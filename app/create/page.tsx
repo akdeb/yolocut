@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { ExternalLink } from "lucide-react";
+import { CreateHome } from "./CreateHome";
 import { FinalAudio } from "./FinalAudio";
 import { FinalVideo } from "./FinalVideo";
 import { Query } from "./Query";
@@ -218,6 +219,12 @@ const YolocutPage = () => {
   }, [brief, indexedClipCount, isCreating, isIndexing]);
 
   const canIndex = clips.length > 0 && !isIndexing && !isLoadingVideos;
+  const shouldShowCreateHome =
+    !isCreating &&
+    searchRows.length === 0 &&
+    !searchError &&
+    !finalAudioUrl &&
+    !finalAudioError;
 
   const loadVideos = async () => {
     setIsLoadingVideos(true);
@@ -263,6 +270,18 @@ const YolocutPage = () => {
   useEffect(() => {
     void loadVideos();
   }, []);
+
+  useEffect(() => {
+    const handleGlobalCreate = () => {
+      void handleCreate();
+    };
+
+    window.addEventListener("yolocut:create", handleGlobalCreate);
+
+    return () => {
+      window.removeEventListener("yolocut:create", handleGlobalCreate);
+    };
+  });
 
   useEffect(() => {
     return () => {
@@ -569,8 +588,8 @@ const YolocutPage = () => {
   };
 
   return (
-    <main className="grid h-dvh min-h-0 grid-cols-[minmax(360px,1.3fr)_minmax(0,2fr)_minmax(340px,1fr)] overflow-hidden bg-[#f7f6f2] text-neutral-950 max-[1100px]:grid-cols-1 max-[1100px]:grid-rows-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
-      <Query
+    shouldShowCreateHome ? (
+      <CreateHome
         brief={brief}
         clips={clips}
         canCreate={canCreate}
@@ -578,12 +597,25 @@ const YolocutPage = () => {
         isCreating={isCreating}
         isIndexing={isIndexing}
         isLoadingVideos={isLoadingVideos}
+        apiBaseUrl={INDEX_API_BASE_URL}
+        onBriefChange={setBrief}
+        onCreate={handleCreate}
+        onIndex={handleIndex}
+        onRefreshVideos={() => void loadVideos()}
+      />
+    ) : (
+    <main className="grid h-full min-h-0 grid-cols-[minmax(360px,1.3fr)_minmax(0,2fr)_minmax(340px,1fr)] overflow-hidden bg-[#f7f6f2] text-neutral-950 max-[1100px]:grid-cols-1 max-[1100px]:grid-rows-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
+      <Query
+        brief={brief}
+        clips={clips}
+        canIndex={canIndex}
+        isIndexing={isIndexing}
+        isLoadingVideos={isLoadingVideos}
         indexMessage={indexMessage}
         jobStatus={jobStatus}
         jobProgressPercent={jobProgressPercent}
         apiBaseUrl={INDEX_API_BASE_URL}
         onBriefChange={setBrief}
-        onCreate={handleCreate}
         onIndex={handleIndex}
         onRefreshVideos={() => void loadVideos()}
       />
@@ -635,6 +667,7 @@ const YolocutPage = () => {
         </div>
       </aside>
     </main>
+    )
   );
 };
 

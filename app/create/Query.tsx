@@ -30,9 +30,7 @@ type IndexJobStatus = {
 type QueryProps = {
   brief: string;
   clips: BrollClip[];
-  canCreate: boolean;
   canIndex: boolean;
-  isCreating: boolean;
   isIndexing: boolean;
   isLoadingVideos: boolean;
   indexMessage: string;
@@ -40,7 +38,6 @@ type QueryProps = {
   jobProgressPercent: number | null;
   apiBaseUrl: string;
   onBriefChange: (value: string) => void;
-  onCreate: () => void;
   onIndex: () => void;
   onRefreshVideos: () => void;
 };
@@ -60,9 +57,7 @@ const getFileName = (path: string) => {
 export const Query = ({
   brief,
   clips,
-  canCreate,
   canIndex,
-  isCreating,
   isIndexing,
   isLoadingVideos,
   indexMessage,
@@ -70,7 +65,6 @@ export const Query = ({
   jobProgressPercent,
   apiBaseUrl,
   onBriefChange,
-  onCreate,
   onIndex,
   onRefreshVideos,
 }: QueryProps) => {
@@ -86,9 +80,6 @@ export const Query = ({
               YOLOCUT
             </h1>
           </div>
-          <Button disabled={!canCreate} className="rounded-xl px-5" onClick={onCreate}>
-            {isCreating ? "Searching..." : "+ Create"}
-          </Button>
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-6">

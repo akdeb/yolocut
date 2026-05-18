@@ -1,0 +1,59 @@
+"use client";
+
+import { useRouter } from "next/navigation";
+
+type NavbarProps = {
+  isAuthenticated: boolean;
+};
+
+export const Navbar = ({ isAuthenticated }: NavbarProps) => {
+  const router = useRouter();
+
+  const handleLogout = async () => {
+    await fetch("/api/logout", { method: "POST" });
+    router.push("/");
+  };
+
+  return (
+    <nav className="flex h-14 shrink-0 items-center justify-between px-5 font-playfair text-sm font-semibold text-neutral-500">
+      <button
+        className="underline-offset-4 hover:text-neutral-950 hover:underline"
+        type="button"
+        onClick={() => router.push("/")}
+      >
+        Home
+      </button>
+      <div className="flex items-center gap-5">
+        <button
+          className="underline-offset-4 enabled:hover:text-neutral-950 enabled:hover:underline disabled:cursor-not-allowed disabled:opacity-40"
+          type="button"
+          disabled={!isAuthenticated}
+          onClick={() => {
+            if (window.location.pathname === "/create") {
+              window.dispatchEvent(new Event("yolocut:create"));
+              return;
+            }
+
+            router.push("/create");
+          }}
+        >
+          Create
+        </button>
+        <button
+          className="underline-offset-4 hover:text-neutral-950 hover:underline"
+          type="button"
+          onClick={() => {
+            if (!isAuthenticated) {
+              router.push("/");
+              return;
+            }
+
+            void handleLogout();
+          }}
+        >
+          {isAuthenticated ? "Logout" : "Login"}
+        </button>
+      </div>
+    </nav>
+  );
+};
