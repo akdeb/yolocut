@@ -2,17 +2,19 @@
 
 /* eslint-disable @remotion/warn-native-media-tag */
 
-import { Loader2, Upload } from "lucide-react";
+import { Loader2, RefreshCw, Upload } from "lucide-react";
 import { useRef } from "react";
 import { Button } from "../../src/components/ui/button";
 import { Card } from "../../src/components/ui/card";
 import { Textarea } from "../../src/components/ui/textarea";
+import { CreatorSelect } from "./CreatorSelect";
 
 type BrollClip = {
   id: string;
   name: string;
   url: string;
   size: string;
+  creator: string;
   indexed: boolean;
   status: "pending" | "indexing" | "indexed" | "failed";
 };
@@ -40,7 +42,10 @@ type QueryProps = {
   jobStatus: IndexJobStatus | null;
   jobProgressPercent: number | null;
   apiBaseUrl: string;
+  creator: string;
+  creatorOptions: string[];
   onBriefChange: (value: string) => void;
+  onCreatorChange: (value: string) => void;
   onIndex: () => void;
   onUploadVideos: (files: File[]) => void;
   onRefreshVideos: () => void;
@@ -48,6 +53,10 @@ type QueryProps = {
 
 const getClipAssetUrl = (url: string, apiBaseUrl: string) => {
   if (url.startsWith("http://") || url.startsWith("https://")) {
+    return url;
+  }
+
+  if (url.startsWith("/")) {
     return url;
   }
 
@@ -69,7 +78,10 @@ export const Query = ({
   jobStatus,
   jobProgressPercent,
   apiBaseUrl,
+  creator,
+  creatorOptions,
   onBriefChange,
+  onCreatorChange,
   onIndex,
   onUploadVideos,
   onRefreshVideos,
@@ -127,7 +139,7 @@ export const Query = ({
                   B-roll clips
                 </h2>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center justify-end gap-2">
                 <input
                   ref={fileInputRef}
                   className="hidden"
@@ -145,16 +157,35 @@ export const Query = ({
                 />
                 <Button
                   variant="outline"
+                  className="h-9 rounded-[14px] px-3 text-sm shadow-sm"
                   onClick={onRefreshVideos}
                   disabled={isLoadingVideos || isIndexing}
                 >
-                  {isLoadingVideos ? "Loading..." : "Refresh"}
-                </Button>
-                <Button onClick={onIndex} disabled={!canIndex}>
-                  {isIndexing ? "Indexing..." : "Index"}
+                  {isLoadingVideos ? (
+                    "Loading..."
+                  ) : (
+                    <>
+                      <RefreshCw className="mr-1.5 size-4" />
+                      Refresh
+                    </>
+                  )}
                 </Button>
                 <Button
+                  className="h-9 rounded-[14px] px-4 text-sm"
+                  onClick={onIndex}
+                  disabled={!canIndex}
+                >
+                  {isIndexing ? "Indexing..." : "Index"}
+                </Button>
+                <CreatorSelect
+                  value={creator}
+                  options={creatorOptions}
+                  disabled={isUploadingVideos}
+                  onChange={onCreatorChange}
+                />
+                <Button
                   variant="outline"
+                  className="size-9 rounded-[14px] px-0 text-neutral-700 shadow-sm"
                   disabled={isUploadingVideos}
                   aria-label="Upload videos"
                   onClick={() => fileInputRef.current?.click()}
@@ -232,7 +263,7 @@ export const Query = ({
 
             <div
               className="grid max-h-[38vh] min-h-0 content-start gap-2 overflow-y-auto p-3"
-              aria-label="Backend B-roll clips"
+              aria-label="Vercel Blob B-roll clips"
             >
               {clips.length > 0 ? (
                 clips.map((clip) => (
@@ -244,8 +275,10 @@ export const Query = ({
                       <video
                         className="size-full object-cover"
                         src={getClipAssetUrl(clip.url, apiBaseUrl)}
-                        preload="metadata"
+                        autoPlay
+                        loop
                         muted
+                        preload="auto"
                         playsInline
                       />
                       {clip.indexed ? (
@@ -272,6 +305,11 @@ export const Query = ({
                         {clip.name}
                       </strong>
                       <span className="text-[13px] text-neutral-500">{clip.size}</span>
+                      {clip.creator ? (
+                        <span className="w-fit rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] font-bold text-neutral-600">
+                          {clip.creator}
+                        </span>
+                      ) : null}
                     </div>
                     <span
                       className={
@@ -288,7 +326,7 @@ export const Query = ({
                 ))
               ) : (
                 <div className="rounded-xl border border-dashed border-neutral-200 px-4 py-8 text-center text-sm text-neutral-500">
-                  No b-roll videos found from the backend yet.
+                  No b-roll videos found in yolocut-broll yet.
                 </div>
               )}
             </div>

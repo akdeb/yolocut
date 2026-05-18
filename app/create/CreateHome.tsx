@@ -2,16 +2,18 @@
 
 /* eslint-disable @remotion/non-pure-animation, @remotion/warn-native-media-tag */
 
-import { ArrowUp, Loader2, RefreshCw, Upload } from "lucide-react";
+import { ArrowUp, DatabaseBackup, Loader2, RefreshCw, Upload } from "lucide-react";
 import Image from "next/image";
 import { useRef } from "react";
 import { Button } from "../../src/components/ui/button";
+import { CreatorSelect } from "./CreatorSelect";
 
 type BrollClip = {
   id: string;
   name: string;
   url: string;
   size: string;
+  creator: string;
   indexed: boolean;
 };
 
@@ -25,7 +27,10 @@ type CreateHomeProps = {
   isLoadingVideos: boolean;
   isUploadingVideos: boolean;
   apiBaseUrl: string;
+  creator: string;
+  creatorOptions: string[];
   onBriefChange: (value: string) => void;
+  onCreatorChange: (value: string) => void;
   onCreate: () => void;
   onIndex: () => void;
   onUploadVideos: (files: File[]) => void;
@@ -34,6 +39,10 @@ type CreateHomeProps = {
 
 const getClipAssetUrl = (url: string, apiBaseUrl: string) => {
   if (url.startsWith("http://") || url.startsWith("https://")) {
+    return url;
+  }
+
+  if (url.startsWith("/")) {
     return url;
   }
 
@@ -50,15 +59,19 @@ export const CreateHome = ({
   isLoadingVideos,
   isUploadingVideos,
   apiBaseUrl,
+  creator,
+  creatorOptions,
   onBriefChange,
+  onCreatorChange,
   onCreate,
   onIndex,
   onUploadVideos,
   onRefreshVideos,
 }: CreateHomeProps) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const indexedClips = clips.filter((clip) => clip.indexed);
-  const carouselClips = indexedClips.length > 0 ? [...indexedClips, ...indexedClips] : [];
+  const indexedClipCount = clips.filter((clip) => clip.indexed).length;
+  const shouldAnimateAssets = clips.length >= 8;
+  const carouselClips = shouldAnimateAssets ? [...clips, ...clips] : clips;
 
   return (
     <main className="grid h-full grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[#f7f6f2] px-5 pb-6 text-neutral-950 sm:pb-8">
@@ -113,10 +126,11 @@ export const CreateHome = ({
           <div className="mb-3 flex items-center justify-between gap-4">
               <div>
                 <p className="m-0 font-playfair text-sm text-neutral-500">
-                  {indexedClips.length} clip{indexedClips.length === 1 ? "" : "s"} ready for Grüns
+                  {clips.length} clip{clips.length === 1 ? "" : "s"} in yolocut-broll
+                  {clips.length > 0 ? ` · ${indexedClipCount} indexed` : ""}
                 </p>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center justify-end gap-2">
                 <input
                   ref={fileInputRef}
                   className="hidden"
@@ -133,34 +147,53 @@ export const CreateHome = ({
                   }}
                 />
                 <Button
-                  variant="secondary"
+                  variant="text"
+                  className="h-9 rounded-[14px] px-3 text-sm"
                   disabled={isLoadingVideos || isIndexing}
                   onClick={onRefreshVideos}
                 >
-                  <RefreshCw className="mr-2 size-4" />
+                  <RefreshCw className="mr-1.5 size-4" />
                   Refresh
                 </Button>
-                <Button disabled={!canIndex} onClick={onIndex}>
-                  {isIndexing ? "Indexing..." : "Index"}
-                </Button>
+                <CreatorSelect
+                  value={creator}
+                  options={creatorOptions}
+                  disabled={isUploadingVideos}
+                  onChange={onCreatorChange}
+                />
                 <Button
                   variant="outline"
+                  className="size-9 rounded-[14px] px-2 text-neutral-700 shadow-sm"
                   disabled={isUploadingVideos}
                   aria-label="Upload videos"
                   onClick={() => fileInputRef.current?.click()}
                 >
                   {isUploadingVideos ? (
-                    <Loader2 className="size-4 animate-spin" />
+                    <Loader2 className="size-4 animate-spin shrink-0" />
                   ) : (
-                    <Upload className="size-4" />
+                    <Upload className="size-4 shrink-0" />
                   )}
+                </Button>
+                <Button
+                  className="h-9 rounded-[14px] px-4 text-sm"
+                  disabled={!canIndex}
+                  onClick={onIndex}
+                >
+                  <DatabaseBackup className="mr-1.5 size-4" />
+                  {isIndexing ? "Indexing..." : "Index"}
                 </Button>
               </div>
             </div>
 
             <div className="relative min-h-0 overflow-hidden">
               {carouselClips.length > 0 ? (
-                <div className="flex w-max gap-4 animate-[asset-marquee_70s_linear_infinite] hover:[animation-play-state:paused]">
+                <div
+                  className={
+                    shouldAnimateAssets
+                      ? "flex w-max gap-4 animate-[asset-marquee_70s_linear_infinite] hover:[animation-play-state:paused]"
+                      : "flex flex-wrap gap-4"
+                  }
+                >
                   {carouselClips.map((clip, index) => (
                     <div
                       key={`${clip.id}-${index}`}
@@ -170,11 +203,14 @@ export const CreateHome = ({
                         <video
                           className="size-full object-cover"
                           src={getClipAssetUrl(clip.url, apiBaseUrl)}
-                          preload="metadata"
+                          autoPlay
+                          loop
                           muted
+                          preload="auto"
                           playsInline
                         />
-                        <span className="absolute right-1.5 top-1.5 flex size-5 items-center justify-center rounded-full bg-emerald-500 text-white shadow-sm">
+                        {clip.indexed ? (
+                          <span className="absolute right-1.5 top-1.5 flex size-5 items-center justify-center rounded-full bg-emerald-500 text-white shadow-sm">
                           <svg
                             aria-hidden="true"
                             className="size-3"
@@ -190,19 +226,24 @@ export const CreateHome = ({
                             />
                           </svg>
                         </span>
+                        ) : null}
                       </div>
                       <div className="grid gap-1 px-3 py-3">
                         <strong className="overflow-hidden text-ellipsis whitespace-nowrap text-sm text-neutral-950">
                           {clip.name}
                         </strong>
-                        <span className="text-xs font-medium text-neutral-500">{clip.size}</span>
+                        {clip.creator ? (
+                          <span className="w-fit rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] font-bold text-neutral-600">
+                            {clip.creator}
+                          </span>
+                        ) : null}
                       </div>
                     </div>
                   ))}
                 </div>
               ) : (
                 <div className="font-playfair rounded-3xl border border-dashed border-neutral-200 bg-white/70 px-6 py-10 text-center text-sm font-medium text-neutral-500">
-                  No indexed footage yet. Index the backend assets to start creating.
+                  No footage in yolocut-broll yet. Upload b-roll to start creating.
                 </div>
               )}
             </div>

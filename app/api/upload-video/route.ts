@@ -1,9 +1,11 @@
-import { put } from "@vercel/blob";
+import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
+import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
 const MAX_VIDEO_BYTES = 1024 * 1024 * 1024 * 4;
+const SESSION_COOKIE = "yolocut_session";
 
 const sanitizeFilename = (filename: string) => {
   return filename
@@ -13,42 +15,53 @@ const sanitizeFilename = (filename: string) => {
 };
 
 export const POST = async (request: Request) => {
-  const token = process.env.VIDEO_STUDIO_READ_WRITE_TOKEN;
+  const token = process.env.BLOB_READ_WRITE_TOKEN;
+  const cookieStore = await cookies();
+  const userId = sanitizeFilename(cookieStore.get(SESSION_COOKIE)?.value ?? "");
 
   if (!token) {
     return NextResponse.json(
-      { error: "Missing VIDEO_STUDIO_READ_WRITE_TOKEN" },
+      { error: "Missing BLOB_READ_WRITE_TOKEN" },
       { status: 500 },
     );
   }
 
-  const formData = await request.formData();
-  const file = formData.get("file");
-
-  if (!(file instanceof File)) {
-    return NextResponse.json({ error: "Video file is required" }, { status: 400 });
+  if (!userId) {
+    return NextResponse.json({ error: "Authentication required" }, { status: 401 });
   }
 
-  if (!file.type.startsWith("video/")) {
-    return NextResponse.json({ error: "Only video files are supported" }, { status: 400 });
+  const body = (await request.json()) as HandleUploadBody;
+  const userPrefix = `${userId}/`;
+
+  try {
+    const jsonResponse = await handleUpload({
+      body,
+      request,
+      token,
+      onBeforeGenerateToken: async (pathname) => {
+        const filename = sanitizeFilename(pathname.split("/").pop() ?? "video") || "video";
+
+        if (!pathname.startsWith(userPrefix)) {
+          throw new Error(`Upload pathname must start with ${userPrefix}`);
+        }
+
+        if (pathname !== `${userPrefix}${filename}`) {
+          throw new Error("Upload pathname contains unsupported characters");
+        }
+
+        return {
+          allowedContentTypes: ["video/*"],
+          maximumSizeInBytes: MAX_VIDEO_BYTES,
+          addRandomSuffix: false,
+        };
+      },
+    });
+
+    return NextResponse.json(jsonResponse);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to generate upload token";
+
+    return NextResponse.json({ error: message }, { status: 400 });
   }
-
-  if (file.size > MAX_VIDEO_BYTES) {
-    return NextResponse.json({ error: "Video file is too large" }, { status: 413 });
-  }
-
-  const filename = sanitizeFilename(file.name) || "video";
-  const pathname = `videos/${Date.now()}-${filename}`;
-  const blob = await put(pathname, file, {
-    access: "public",
-    addRandomSuffix: true,
-    token,
-  });
-
-  return NextResponse.json({
-    url: blob.url,
-    pathname: blob.pathname,
-    size: file.size,
-    contentType: file.type,
-  });
 };

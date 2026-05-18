@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 
 type NavbarProps = {
@@ -53,6 +54,15 @@ export const Navbar = ({ isAuthenticated }: NavbarProps) => {
         >
           {isAuthenticated ? "Logout" : "Login"}
         </button>
+        {isAuthenticated ? (
+          <Image
+            src="/gruns.png"
+            alt="Grüns"
+            width={28}
+            height={28}
+            className="size-7 shrink-0 rounded-md object-contain"
+          />
+        ) : null}
       </div>
     </nav>
   );

@@ -1,11 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { upload } from "@vercel/blob/client";
 import { ExternalLink } from "lucide-react";
+import { type PutBlobResult } from "@vercel/blob";
 import { CreateHome } from "./CreateHome";
 import { FinalAudio } from "./FinalAudio";
 import { FinalVideo } from "./FinalVideo";
 import { Query } from "./Query";
+import { UploadToast, type UploadToastState } from "./UploadToast";
 import {
   Search,
   getSearchResultId,
@@ -23,6 +26,7 @@ type BrollClip = {
   path: string;
   url: string;
   size: string;
+  creator: string;
   modifiedAt: string;
   indexed: boolean;
   status: "pending" | "indexing" | "indexed" | "failed";
@@ -30,6 +34,8 @@ type BrollClip = {
 
 type VideosResponse = {
   directory: string;
+  user_id?: string;
+  upload_prefix?: string;
   count: number;
   indexed_count: number;
   unindexed_count: number;
@@ -40,6 +46,8 @@ type VideosResponse = {
     relative_path: string;
     path: string;
     url: string;
+    stream_url: string;
+    creator?: string;
     indexed: boolean;
     size_bytes: number;
     modified_at: string;
@@ -79,6 +87,20 @@ const INDEX_API_BASE_URL = "http://127.0.0.1:8080";
 const MAX_BRIEF_ITEMS = 50;
 const MAX_VISUAL_BROLL_LENGTH = 1000;
 const MAX_TRANSCRIPT_LENGTH = 2000;
+const CREATOR_OPTIONS = [
+  "alexis anne",
+  "alexis reneel",
+  "ali cardinal",
+  "allison baldwin",
+  "amanda hernandez",
+  "angela chen",
+  "anna panza",
+  "annika swanson",
+  "ashley rogers",
+  "ashley vance",
+  "austin gregory",
+  "bailey holmquest",
+];
 
 const formatBytes = (bytes: number) => {
   if (bytes === 0) {
@@ -96,6 +118,17 @@ const sleep = (milliseconds: number) =>
   new Promise((resolve) => {
     window.setTimeout(resolve, milliseconds);
   });
+
+const sanitizeFilename = (filename: string) => {
+  return filename
+    .replace(/[^a-zA-Z0-9._ -]/g, "_")
+    .replace(/\s+/g, " ")
+    .trim();
+};
+
+const getSizeInMegabytes = (bytes: number) => {
+  return Math.max(1, Math.round(bytes / 1024 / 1024));
+};
 
 const getJobState = (payload: Record<string, unknown>) => {
   return String(payload.status ?? payload.state ?? "").toLowerCase();
@@ -197,6 +230,9 @@ const YolocutPage = () => {
   const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
   const [isOpeningEditor, setIsOpeningEditor] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [uploadPrefix, setUploadPrefix] = useState("");
+  const [creator, setCreator] = useState(CREATOR_OPTIONS[0]);
+  const [uploadToast, setUploadToast] = useState<UploadToastState>(null);
 
   const jobProgressPercent = getProgressPercent(jobStatus?.progress);
 
@@ -229,16 +265,17 @@ const YolocutPage = () => {
 
   const loadVideos = async () => {
     setIsLoadingVideos(true);
-    setIndexMessage("Loading b-roll from FastAPI...");
+    setIndexMessage("Loading b-roll from Vercel Blob...");
 
     try {
-      const response = await fetch(`${INDEX_API_BASE_URL}/videos`);
+      const response = await fetch("/api/broll-videos");
 
       if (!response.ok) {
         throw new Error("Failed to load videos");
       }
 
       const data = (await response.json()) as VideosResponse;
+      setUploadPrefix(data.upload_prefix ?? "");
       const nextClips = data.videos.map((video) => {
         return {
           id: video.path,
@@ -246,8 +283,9 @@ const YolocutPage = () => {
           filename: video.filename,
           relativePath: video.relative_path,
           path: video.path,
-          url: video.url,
+          url: video.stream_url,
           size: formatBytes(video.size_bytes),
+          creator: video.creator ?? "",
           modifiedAt: video.modified_at,
           indexed: video.indexed,
           status: video.indexed ? ("indexed" as const) : ("pending" as const),
@@ -257,8 +295,8 @@ const YolocutPage = () => {
       setClips(nextClips);
       setIndexMessage(
         data.count > 0
-          ? `${data.count} b-roll clip${data.count === 1 ? "" : "s"} loaded. ${data.indexed_count} indexed, ${data.unindexed_count} pending.`
-          : "No b-roll clips found in the backend video directory.",
+          ? `${data.count} b-roll clip${data.count === 1 ? "" : "s"} loaded from Vercel Blob.`
+          : "No b-roll clips found in yolocut-broll yet.",
       );
     } catch (error) {
       setClips([]);
@@ -463,31 +501,99 @@ const YolocutPage = () => {
 
     setIsUploadingVideos(true);
     setIndexMessage(`Uploading ${files.length} video${files.length === 1 ? "" : "s"}...`);
+    setUploadToast({
+      status: "loading",
+      title: "Uploading b-roll",
+      description: `Preparing ${files.length} video${files.length === 1 ? "" : "s"}...`,
+    });
 
     try {
-      await Promise.all(
-        files.map(async (file) => {
-          const formData = new FormData();
-          formData.append("file", file);
+      for (const [index, file] of files.entries()) {
+        if (!uploadPrefix) {
+          throw new Error("Upload destination is not loaded yet. Refresh and try again.");
+        }
 
-          const response = await fetch("/api/upload-video", {
-            method: "POST",
-            body: formData,
-          });
+        const normalizedCreator = creator.trim().toLowerCase();
 
-          if (!response.ok) {
-            const error = (await response.json().catch(() => null)) as { error?: string } | null;
-            throw new Error(error?.error ?? `Failed to upload ${file.name}`);
-          }
-        }),
-      );
+        if (!normalizedCreator) {
+          throw new Error("Choose or type a creator before uploading.");
+        }
+
+        const filename = sanitizeFilename(file.name) || "video";
+        const pathname = `${uploadPrefix}${Date.now()}-${filename}`;
+
+        setUploadToast({
+          status: "loading",
+          title: "Uploading b-roll",
+          description: `${file.name} (${index + 1}/${files.length}) is starting...`,
+        });
+
+        const blob = (await upload(pathname, file, {
+          access: "private",
+          handleUploadUrl: "/api/upload-video",
+          multipart: true,
+          contentType: file.type || "video/mp4",
+          onUploadProgress: ({ percentage }) => {
+            const progress = Math.round(percentage);
+            setIndexMessage(
+              `Uploading ${file.name} (${index + 1}/${files.length}) ${progress}%...`,
+            );
+            setUploadToast({
+              status: "loading",
+              title: "Uploading b-roll",
+              description: `${file.name} (${index + 1}/${files.length}) ${progress}% uploaded...`,
+            });
+          },
+        })) as PutBlobResult;
+
+        setUploadToast({
+          status: "loading",
+          title: "Saving b-roll",
+          description: `${file.name} uploaded. Adding metadata to Supabase...`,
+        });
+
+        const metadataResponse = await fetch("/api/brolls", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: file.name,
+            size: getSizeInMegabytes(file.size),
+            blob_url: blob.url,
+            creator: normalizedCreator,
+          }),
+        });
+
+        if (!metadataResponse.ok) {
+          const error = (await metadataResponse.json().catch(() => null)) as
+            | { error?: string }
+            | null;
+          throw new Error(error?.error ?? `Failed to save metadata for ${file.name}`);
+        }
+      }
 
       setIndexMessage(
         `${files.length} video${files.length === 1 ? "" : "s"} uploaded to Vercel Blob.`,
       );
+      setUploadToast({
+        status: "loading",
+        title: "Refreshing library",
+        description: "Upload complete. Fetching the updated b-roll list...",
+      });
       await loadVideos();
+      setUploadToast({
+        status: "success",
+        title: "B-roll ready",
+        description: `${files.length} video${files.length === 1 ? " is" : "s are"} uploaded, saved, and ready to display.`,
+      });
+      window.setTimeout(() => setUploadToast(null), 4000);
     } catch (error) {
-      setIndexMessage(error instanceof Error ? error.message : "Upload failed");
+      const message = error instanceof Error ? error.message : "Upload failed";
+      setIndexMessage(message);
+      setUploadToast({
+        status: "error",
+        title: "Upload failed",
+        description: message,
+      });
     } finally {
       setIsUploadingVideos(false);
     }
@@ -626,7 +732,8 @@ const YolocutPage = () => {
   };
 
   return (
-    shouldShowCreateHome ? (
+    <>
+    {shouldShowCreateHome ? (
       <CreateHome
         brief={brief}
         clips={clips}
@@ -637,7 +744,10 @@ const YolocutPage = () => {
         isLoadingVideos={isLoadingVideos}
         isUploadingVideos={isUploadingVideos}
         apiBaseUrl={INDEX_API_BASE_URL}
+        creator={creator}
+        creatorOptions={CREATOR_OPTIONS}
         onBriefChange={setBrief}
+        onCreatorChange={setCreator}
         onCreate={handleCreate}
         onIndex={handleIndex}
         onUploadVideos={(files) => void handleUploadVideos(files)}
@@ -656,7 +766,10 @@ const YolocutPage = () => {
         jobStatus={jobStatus}
         jobProgressPercent={jobProgressPercent}
         apiBaseUrl={INDEX_API_BASE_URL}
+        creator={creator}
+        creatorOptions={CREATOR_OPTIONS}
         onBriefChange={setBrief}
+        onCreatorChange={setCreator}
         onIndex={handleIndex}
         onUploadVideos={(files) => void handleUploadVideos(files)}
         onRefreshVideos={() => void loadVideos()}
@@ -709,7 +822,9 @@ const YolocutPage = () => {
         </div>
       </aside>
     </main>
-    )
+    )}
+    <UploadToast toast={uploadToast} />
+    </>
   );
 };
 
