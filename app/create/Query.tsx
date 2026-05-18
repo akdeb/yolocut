@@ -2,6 +2,8 @@
 
 /* eslint-disable @remotion/warn-native-media-tag */
 
+import { Loader2, Upload } from "lucide-react";
+import { useRef } from "react";
 import { Button } from "../../src/components/ui/button";
 import { Card } from "../../src/components/ui/card";
 import { Textarea } from "../../src/components/ui/textarea";
@@ -33,12 +35,14 @@ type QueryProps = {
   canIndex: boolean;
   isIndexing: boolean;
   isLoadingVideos: boolean;
+  isUploadingVideos: boolean;
   indexMessage: string;
   jobStatus: IndexJobStatus | null;
   jobProgressPercent: number | null;
   apiBaseUrl: string;
   onBriefChange: (value: string) => void;
   onIndex: () => void;
+  onUploadVideos: (files: File[]) => void;
   onRefreshVideos: () => void;
 };
 
@@ -60,14 +64,18 @@ export const Query = ({
   canIndex,
   isIndexing,
   isLoadingVideos,
+  isUploadingVideos,
   indexMessage,
   jobStatus,
   jobProgressPercent,
   apiBaseUrl,
   onBriefChange,
   onIndex,
+  onUploadVideos,
   onRefreshVideos,
 }: QueryProps) => {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   return (
     <section className="min-h-0 overflow-hidden border-r border-neutral-200 bg-white/85 max-[900px]:border-b max-[900px]:border-r-0">
       <div className="flex h-full min-h-0 flex-col overflow-hidden">
@@ -120,6 +128,21 @@ export const Query = ({
                 </h2>
               </div>
               <div className="flex items-center gap-2">
+                <input
+                  ref={fileInputRef}
+                  className="hidden"
+                  type="file"
+                  accept="video/*,.mov,.mp4,.m4v,.webm,.mkv,.avi"
+                  multiple
+                  onChange={(event) => {
+                    const files = Array.from(event.target.files ?? []);
+                    event.target.value = "";
+
+                    if (files.length > 0) {
+                      onUploadVideos(files);
+                    }
+                  }}
+                />
                 <Button
                   variant="outline"
                   onClick={onRefreshVideos}
@@ -129,6 +152,18 @@ export const Query = ({
                 </Button>
                 <Button onClick={onIndex} disabled={!canIndex}>
                   {isIndexing ? "Indexing..." : "Index"}
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={isUploadingVideos}
+                  aria-label="Upload videos"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  {isUploadingVideos ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Upload className="size-4" />
+                  )}
                 </Button>
               </div>
             </div>

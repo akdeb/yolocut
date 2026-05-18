@@ -2,8 +2,9 @@
 
 /* eslint-disable @remotion/non-pure-animation, @remotion/warn-native-media-tag */
 
-import { ArrowUp, Loader2, RefreshCw } from "lucide-react";
+import { ArrowUp, Loader2, RefreshCw, Upload } from "lucide-react";
 import Image from "next/image";
+import { useRef } from "react";
 import { Button } from "../../src/components/ui/button";
 
 type BrollClip = {
@@ -22,10 +23,12 @@ type CreateHomeProps = {
   isCreating: boolean;
   isIndexing: boolean;
   isLoadingVideos: boolean;
+  isUploadingVideos: boolean;
   apiBaseUrl: string;
   onBriefChange: (value: string) => void;
   onCreate: () => void;
   onIndex: () => void;
+  onUploadVideos: (files: File[]) => void;
   onRefreshVideos: () => void;
 };
 
@@ -45,12 +48,15 @@ export const CreateHome = ({
   isCreating,
   isIndexing,
   isLoadingVideos,
+  isUploadingVideos,
   apiBaseUrl,
   onBriefChange,
   onCreate,
   onIndex,
+  onUploadVideos,
   onRefreshVideos,
 }: CreateHomeProps) => {
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const indexedClips = clips.filter((clip) => clip.indexed);
   const carouselClips = indexedClips.length > 0 ? [...indexedClips, ...indexedClips] : [];
 
@@ -111,6 +117,21 @@ export const CreateHome = ({
                 </p>
               </div>
               <div className="flex items-center gap-2">
+                <input
+                  ref={fileInputRef}
+                  className="hidden"
+                  type="file"
+                  accept="video/*,.mov,.mp4,.m4v,.webm,.mkv,.avi"
+                  multiple
+                  onChange={(event) => {
+                    const files = Array.from(event.target.files ?? []);
+                    event.target.value = "";
+
+                    if (files.length > 0) {
+                      onUploadVideos(files);
+                    }
+                  }}
+                />
                 <Button
                   variant="secondary"
                   disabled={isLoadingVideos || isIndexing}
@@ -121,6 +142,18 @@ export const CreateHome = ({
                 </Button>
                 <Button disabled={!canIndex} onClick={onIndex}>
                   {isIndexing ? "Indexing..." : "Index"}
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={isUploadingVideos}
+                  aria-label="Upload videos"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  {isUploadingVideos ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <Upload className="size-4" />
+                  )}
                 </Button>
               </div>
             </div>
@@ -168,7 +201,7 @@ export const CreateHome = ({
                   ))}
                 </div>
               ) : (
-                <div className="rounded-3xl border border-dashed border-neutral-200 bg-white/70 px-6 py-10 text-center text-sm font-medium text-neutral-500">
+                <div className="font-playfair rounded-3xl border border-dashed border-neutral-200 bg-white/70 px-6 py-10 text-center text-sm font-medium text-neutral-500">
                   No indexed footage yet. Index the backend assets to start creating.
                 </div>
               )}

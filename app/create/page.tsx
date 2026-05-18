@@ -183,6 +183,7 @@ const YolocutPage = () => {
   const [clips, setClips] = useState<BrollClip[]>([]);
   const [isLoadingVideos, setIsLoadingVideos] = useState(true);
   const [isIndexing, setIsIndexing] = useState(false);
+  const [isUploadingVideos, setIsUploadingVideos] = useState(false);
   const [indexMessage, setIndexMessage] = useState("");
   const [jobStatus, setJobStatus] = useState<IndexJobStatus | null>(null);
   const [searchRows, setSearchRows] = useState<SearchRow[]>([]);
@@ -455,6 +456,43 @@ const YolocutPage = () => {
     }
   };
 
+  const handleUploadVideos = async (files: File[]) => {
+    if (files.length === 0 || isUploadingVideos) {
+      return;
+    }
+
+    setIsUploadingVideos(true);
+    setIndexMessage(`Uploading ${files.length} video${files.length === 1 ? "" : "s"}...`);
+
+    try {
+      await Promise.all(
+        files.map(async (file) => {
+          const formData = new FormData();
+          formData.append("file", file);
+
+          const response = await fetch("/api/upload-video", {
+            method: "POST",
+            body: formData,
+          });
+
+          if (!response.ok) {
+            const error = (await response.json().catch(() => null)) as { error?: string } | null;
+            throw new Error(error?.error ?? `Failed to upload ${file.name}`);
+          }
+        }),
+      );
+
+      setIndexMessage(
+        `${files.length} video${files.length === 1 ? "" : "s"} uploaded to Vercel Blob.`,
+      );
+      await loadVideos();
+    } catch (error) {
+      setIndexMessage(error instanceof Error ? error.message : "Upload failed");
+    } finally {
+      setIsUploadingVideos(false);
+    }
+  };
+
   const handleCreate = async () => {
     if (!canCreate) {
       return;
@@ -597,10 +635,12 @@ const YolocutPage = () => {
         isCreating={isCreating}
         isIndexing={isIndexing}
         isLoadingVideos={isLoadingVideos}
+        isUploadingVideos={isUploadingVideos}
         apiBaseUrl={INDEX_API_BASE_URL}
         onBriefChange={setBrief}
         onCreate={handleCreate}
         onIndex={handleIndex}
+        onUploadVideos={(files) => void handleUploadVideos(files)}
         onRefreshVideos={() => void loadVideos()}
       />
     ) : (
@@ -611,12 +651,14 @@ const YolocutPage = () => {
         canIndex={canIndex}
         isIndexing={isIndexing}
         isLoadingVideos={isLoadingVideos}
+        isUploadingVideos={isUploadingVideos}
         indexMessage={indexMessage}
         jobStatus={jobStatus}
         jobProgressPercent={jobProgressPercent}
         apiBaseUrl={INDEX_API_BASE_URL}
         onBriefChange={setBrief}
         onIndex={handleIndex}
+        onUploadVideos={(files) => void handleUploadVideos(files)}
         onRefreshVideos={() => void loadVideos()}
       />
 

@@ -12,6 +12,7 @@
     "@remotion/media-utils": "4.0.462",
     "@remotion/tailwind-v4": "4.0.462",
     "@remotion/zod-types": "4.0.462",
+    "@vercel/blob": "^2.3.3",
     "lucide-react": "^1.16.0",
     "next": "^16.2.6",
     "react": "19.2.3",

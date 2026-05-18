@@ -68,7 +68,7 @@ const Home = () => {
                   : "grid h-0 w-0 shrink-0 place-items-center overflow-hidden rounded-2xl border border-transparent bg-white opacity-0 transition-all duration-300 sm:h-28"
               }
             > 
-              <Image src="/gruns.jpeg" alt="Gruns" width={112} height={112} className="size-full object-cover" />
+              <Image src="/gruns.png" alt="Gruns" width={112} height={112} className="size-full object-cover" />
             </div>
 
             <div
