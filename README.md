@@ -1,15 +1,7 @@
-# Remotion video
+# Yolocut
 
-<p align="center">
-  <a href="https://github.com/remotion-dev/logo">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://github.com/remotion-dev/logo/raw/main/animated-logo-banner-dark.apng">
-      <img alt="Animated Remotion Logo" src="https://github.com/remotion-dev/logo/raw/main/animated-logo-banner-light.gif">
-    </picture>
-  </a>
-</p>
-
-Welcome to your Remotion project!
+Yolocut is a Next.js + TypeScript app wrapped around a Remotion Studio
+composition for sequencing public-folder videos and generating captions.
 
 ## Commands
 
@@ -25,6 +17,17 @@ npm i
 npm run dev
 ```
 
+This starts the Next.js app only at `http://localhost:3000/yolocut`.
+
+**Start Remotion Studio**
+
+```console
+npm run studio
+```
+
+This starts Remotion Studio on `http://localhost:3002` plus the local caption
+server used by the `Caption timeline` toolbar button.
+
 **Render video**
 
 ```console
@@ -39,8 +42,12 @@ npx remotion upgrade
 
 ## Captioning
 
-Replace the `sample-video.mp4` with your video file.
-Caption all the videos in you `public` by running the following command:
+Add one or more `.mp4`, `.mov`, `.mkv`, or `.webm` files to `public/`.
+The `CaptionedVideo` composition automatically sequences every public video in
+filename order.
+
+Caption all the videos in your `public` folder by pressing `Caption timeline`
+in Studio or by running the following command:
 
 ```console
 node sub.mjs

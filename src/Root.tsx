@@ -1,5 +1,5 @@
 import "./index.css";
-import { Composition, staticFile } from "remotion";
+import { Composition } from "remotion";
 import {
   CaptionedVideo,
   calculateCaptionedVideoMetadata,
@@ -18,7 +18,7 @@ export const RemotionRoot: React.FC = () => {
       width={1080}
       height={1920}
       defaultProps={{
-        src: staticFile("sample-video.mp4"),
+        clips: [],
       }}
     />
   );

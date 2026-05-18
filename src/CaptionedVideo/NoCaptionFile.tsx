@@ -1,7 +1,9 @@
 import React from "react";
 import { AbsoluteFill } from "remotion";
 
-export const NoCaptionFile: React.FC = () => {
+export const NoCaptionFile: React.FC<{ missingCount: number }> = ({
+  missingCount,
+}) => {
   return (
     <AbsoluteFill
       style={{
@@ -14,8 +16,9 @@ export const NoCaptionFile: React.FC = () => {
         fontFamily: "sans-serif",
       }}
     >
-      No caption file found in the public folder. <br /> Run `node sub.mjs` to
-      install Whisper.cpp and create one.
+      {missingCount} caption {missingCount === 1 ? "file is" : "files are"}{" "}
+      missing in the public folder. <br /> Press the caption button in Studio or
+      run `node sub.mjs` to create them.
     </AbsoluteFill>
   );
 };

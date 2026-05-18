@@ -8,4 +8,5 @@ import { enableTailwind } from '@remotion/tailwind-v4';
 
 Config.setVideoImageFormat("jpeg");
 Config.setOverwriteOutput(true);
+Config.setStudioPort(3002);
 Config.overrideWebpackConfig(enableTailwind);
