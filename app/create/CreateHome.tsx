@@ -102,7 +102,7 @@ export const CreateHome = ({
         </div>
       </section>
 
-      <section className="min-h-0 w-full pt-5">
+      <section className="min-h-0 w-full pt-5 mt-4">
         <div className="mx-auto grid h-full w-full max-w-5xl grid-rows-[auto_minmax(0,1fr)]">
           <div className="mb-3 flex items-center justify-between gap-4">
               <div>
