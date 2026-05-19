@@ -58,6 +58,7 @@ type IndexJobStatus = {
   job_id?: string;
   status?: string;
   progress?: number;
+  current_broll_id?: string;
   current_file?: string;
   files_done?: number;
   total_files?: number;
@@ -83,10 +84,16 @@ type BatchSearchResponse = {
   }>;
 };
 
-const INDEX_API_BASE_URL = "http://127.0.0.1:8080";
+const DEFAULT_INDEX_API_BASE_URL =
+  process.env.NODE_ENV === "production"
+    ? "https://yolocut-server.vercel.app"
+    : "http://127.0.0.1:8080";
+const INDEX_API_BASE_URL =
+  process.env.NEXT_PUBLIC_YOLOCUT_SERVER_URL ?? DEFAULT_INDEX_API_BASE_URL;
 const MAX_BRIEF_ITEMS = 50;
 const MAX_VISUAL_BROLL_LENGTH = 1000;
 const MAX_TRANSCRIPT_LENGTH = 2000;
+const INDEX_POLL_INTERVAL_MS = 1000;
 const CREATOR_OPTIONS = [
   "alexis anne",
   "alexis reneel",
@@ -154,6 +161,23 @@ const getProgressPercent = (progress: number | undefined) => {
 
   const normalizedProgress = progress > 1 ? progress : progress * 100;
   return Math.max(0, Math.min(100, Math.round(normalizedProgress)));
+};
+
+const getIndexStatusDescription = (status: IndexJobStatus) => {
+  const progressPercent = getProgressPercent(status.progress);
+  const state = status.status ?? "running";
+  const progress = progressPercent === null ? "" : ` (${progressPercent}% complete)`;
+  const fileProgress =
+    typeof status.files_done === "number" && typeof status.total_files === "number"
+      ? ` ${status.files_done}/${status.total_files} files`
+      : "";
+  const chunkProgress =
+    typeof status.current_chunk === "number" && typeof status.total_chunks_in_file === "number"
+      ? `, chunk ${status.current_chunk}/${status.total_chunks_in_file}`
+      : "";
+  const currentFile = status.current_file ? `: ${status.current_file}` : "";
+
+  return `Index job is ${state}${progress}${fileProgress}${chunkProgress}${currentFile}`;
 };
 
 const parseVisualBrollPrompts = (value: string): VisualBrollPrompt[] => {
@@ -231,6 +255,7 @@ const YolocutPage = () => {
   const [isOpeningEditor, setIsOpeningEditor] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [uploadPrefix, setUploadPrefix] = useState("");
+  const [userId, setUserId] = useState("");
   const [creator, setCreator] = useState(CREATOR_OPTIONS[0]);
   const [uploadToast, setUploadToast] = useState<UploadToastState>(null);
 
@@ -255,7 +280,11 @@ const YolocutPage = () => {
     return brief.trim().length > 0 && indexedClipCount > 1 && !isCreating && !isIndexing;
   }, [brief, indexedClipCount, isCreating, isIndexing]);
 
-  const canIndex = clips.length > 0 && !isIndexing && !isLoadingVideos;
+  const unindexedClipCount = useMemo(() => {
+    return clips.filter((clip) => !clip.indexed).length;
+  }, [clips]);
+
+  const canIndex = unindexedClipCount > 0 && !isIndexing && !isLoadingVideos;
   const shouldShowCreateHome =
     !isCreating &&
     searchRows.length === 0 &&
@@ -276,6 +305,7 @@ const YolocutPage = () => {
 
       const data = (await response.json()) as VideosResponse;
       setUploadPrefix(data.upload_prefix ?? "");
+      setUserId(data.user_id ?? "");
       const nextClips = data.videos.map((video) => {
         return {
           id: video.path,
@@ -295,7 +325,7 @@ const YolocutPage = () => {
       setClips(nextClips);
       setIndexMessage(
         data.count > 0
-          ? `${data.count} b-roll clip${data.count === 1 ? "" : "s"} loaded from Vercel Blob.`
+          ? `${data.count} b-roll clip${data.count === 1 ? "" : "s"} loaded from Supabase.`
           : "No b-roll clips found in yolocut-broll yet.",
       );
     } catch (error) {
@@ -334,14 +364,20 @@ const YolocutPage = () => {
     const progressPercent = getProgressPercent(status.progress);
     const progress = progressPercent === null ? "" : ` ${progressPercent}%`;
     const state = status.status ?? "running";
+    const description = getIndexStatusDescription(status);
 
     setJobStatus(status);
     setIndexMessage(`Indexing ${state}${progress}...`);
+    setUploadToast({
+      status: "loading",
+      title: "Indexing b-roll",
+      description,
+    });
   };
 
   const pollJobUntilComplete = async (jobId: string) => {
     for (;;) {
-      await sleep(1000);
+      await sleep(INDEX_POLL_INTERVAL_MS);
 
       const statusResponse = await fetch(`${INDEX_API_BASE_URL}/jobs/${jobId}`);
 
@@ -430,9 +466,24 @@ const YolocutPage = () => {
       return;
     }
 
+    if (!userId) {
+      setIndexMessage("Missing user_id. Refresh and try again.");
+      setUploadToast({
+        status: "error",
+        title: "Indexing failed",
+        description: "Missing user_id. Refresh and try again.",
+      });
+      return;
+    }
+
     setIsIndexing(true);
     setIndexMessage("Starting index job...");
     setJobStatus({ status: "queued", progress: 0 });
+    setUploadToast({
+      status: "loading",
+      title: "Indexing b-roll",
+      description: `Starting index job for ${unindexedClipCount} unindexed clip${unindexedClipCount === 1 ? "" : "s"}...`,
+    });
     setClips((currentClips) =>
       currentClips.map((clip) => ({
         ...clip,
@@ -445,14 +496,16 @@ const YolocutPage = () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          chunk_duration: 2,
+          customer_id: userId,
+          chunk_duration: 3,
           overlap: 1,
           backend: "gemini",
         }),
       });
 
       if (!jobResponse.ok) {
-        throw new Error("Failed to start indexing");
+        const error = (await jobResponse.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(error?.error ?? "Failed to start indexing");
       }
 
       const job = (await jobResponse.json()) as { job_id?: string };
@@ -463,6 +516,11 @@ const YolocutPage = () => {
 
       setJobStatus({ job_id: job.job_id, status: "queued", progress: 0 });
       setIndexMessage(`Indexing job ${job.job_id} is running...`);
+      setUploadToast({
+        status: "loading",
+        title: "Indexing b-roll",
+        description: `Index job ${job.job_id} is running...`,
+      });
       await streamJobUntilComplete(job.job_id);
 
       await loadVideos();
@@ -474,13 +532,20 @@ const YolocutPage = () => {
         succeeded: true,
       }));
       setIndexMessage("Index complete. Indexed b-roll is ready for creation.");
+      setUploadToast({
+        status: "success",
+        title: "Indexing complete",
+        description: "All unindexed b-roll clips have been indexed and refreshed.",
+      });
+      window.setTimeout(() => setUploadToast(null), 4000);
     } catch (error) {
+      const message = error instanceof Error ? error.message : "Indexing failed";
       setJobStatus((currentStatus) => ({
         ...currentStatus,
         status: "failed",
         done: true,
         failed: true,
-        error: error instanceof Error ? error.message : "Indexing failed",
+        error: message,
       }));
       setClips((currentClips) =>
         currentClips.map((clip) => ({
@@ -488,7 +553,12 @@ const YolocutPage = () => {
           status: clip.indexed ? "indexed" : "failed",
         })),
       );
-      setIndexMessage(error instanceof Error ? error.message : "Indexing failed");
+      setIndexMessage(message);
+      setUploadToast({
+        status: "error",
+        title: "Indexing failed",
+        description: message,
+      });
     } finally {
       setIsIndexing(false);
     }
