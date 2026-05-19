@@ -2,10 +2,11 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, ChevronRight } from "lucide-react";
-import { Button } from "../../../src/components/ui/button";
+import { useRouter } from "next/navigation";
+import { ChevronRight } from "lucide-react";
 import { FinalAudio } from "../../create/FinalAudio";
 import { FinalVideo } from "../../create/FinalVideo";
+import { PromptBar } from "../../create/PromptBar";
 import {
   Search,
   getSearchResultId,
@@ -37,7 +38,7 @@ type BatchSearchResponse = {
   }>;
 };
 
-type StudioClientProps = {
+type StudioProps = {
   queryId: string;
 };
 
@@ -49,11 +50,8 @@ const INDEX_API_BASE_URL =
   process.env.NEXT_PUBLIC_YOLOCUT_SERVER_URL ?? DEFAULT_INDEX_API_BASE_URL;
 
 const parseVisualBrollPrompts = (value: string): VisualBrollPrompt[] => {
-  const parsed = JSON.parse(value) as unknown;
-
-  if (!Array.isArray(parsed)) {
-    throw new Error("Query must be a JSON array.");
-  }
+  const parsedValue = JSON.parse(value) as unknown;
+  const parsed = Array.isArray(parsedValue) ? parsedValue : [parsedValue];
 
   return parsed.map((item, index) => {
     if (
@@ -96,12 +94,8 @@ const getAudioStreamUrl = (audioUrl: string | null) => {
   }
 };
 
-const getShortQueryText = (queryText: string) => {
-  const compact = queryText.replace(/\s+/g, " ").trim();
-  return compact.length > 72 ? `${compact.slice(0, 72)}...` : compact;
-};
-
-export const StudioClient = ({ queryId }: StudioClientProps) => {
+export const Studio = ({ queryId }: StudioProps) => {
+  const router = useRouter();
   const [query, setQuery] = useState<QueryRow | null>(null);
   const [queryText, setQueryText] = useState("");
   const [searchRows, setSearchRows] = useState<SearchRow[]>([]);
@@ -112,6 +106,7 @@ export const StudioClient = ({ queryId }: StudioClientProps) => {
   const [finalAudioUrl, setFinalAudioUrl] = useState("");
   const [finalAudioDuration, setFinalAudioDuration] = useState(0);
   const [finalAudioError, setFinalAudioError] = useState("");
+  const [isSubmittingPrompt, setIsSubmittingPrompt] = useState(false);
   const hasProcessedRef = useRef(false);
 
   const prompts = useMemo(() => {
@@ -136,6 +131,44 @@ export const StudioClient = ({ queryId }: StudioClientProps) => {
       return selectedResult ? [selectedResult] : [];
     });
   }, [searchRows, selectedResultIdsByRow]);
+
+  const submitPrompt = async () => {
+    const nextPrompt = queryText.trim();
+
+    if (!nextPrompt || isSubmittingPrompt) {
+      return;
+    }
+
+    setIsSubmittingPrompt(true);
+    setSearchError("");
+
+    try {
+      parseVisualBrollPrompts(nextPrompt);
+      const response = await fetch("/api/queries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query_text: nextPrompt }),
+      });
+
+      if (!response.ok) {
+        const error = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(error?.error ?? "Failed to create query");
+      }
+
+      const data = (await response.json()) as { query?: { query_id?: string } | null };
+      const nextQueryId = data.query?.query_id;
+
+      if (!nextQueryId) {
+        throw new Error("Query did not return a query_id");
+      }
+
+      router.push(`/studio/${encodeURIComponent(nextQueryId)}`);
+    } catch (error) {
+      setSearchError(error instanceof Error ? error.message : "Failed to create query");
+    } finally {
+      setIsSubmittingPrompt(false);
+    }
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -288,19 +321,41 @@ export const StudioClient = ({ queryId }: StudioClientProps) => {
   }, [query]);
 
   return (
-    <main className="grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden bg-[#f7f6f2] text-neutral-950">
-      <header className="flex h-14 items-center border-b border-neutral-200 bg-white/80 px-6">
+    <main className="relative grid h-full min-h-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[#f7f6f2] text-neutral-950">
+      <header className="flex h-14 items-center px-6 font-playfair">
         <nav className="flex min-w-0 items-center gap-2 text-sm font-semibold text-neutral-500">
-          <Link className="text-neutral-950 hover:underline" href="/create">
+          <Link className="text-neutral-950 underline-offset-4 hover:underline" href="/create">
             Create
           </Link>
           <ChevronRight className="size-4 shrink-0" />
-          <span className="truncate">{getShortQueryText(queryText || queryId)}</span>
+          <span className="truncate">{queryId.slice(0, 6)}</span>
         </nav>
       </header>
 
-      <div className="grid min-h-0 grid-cols-[minmax(0,1.6fr)_minmax(360px,0.8fr)] overflow-hidden max-[1000px]:grid-cols-1">
-        <section className="min-h-0 overflow-hidden border-r border-neutral-200">
+      <div className="grid min-h-0 grid-cols-[minmax(360px,0.82fr)_minmax(0,1.38fr)] overflow-hidden max-[1000px]:grid-cols-1">
+        <aside className="min-h-0 overflow-y-auto px-5 py-8 pb-32">
+          <div className="grid gap-8">
+            <FinalVideo
+              clips={selectedClips}
+              apiBaseUrl={INDEX_API_BASE_URL}
+              expectedClipCount={searchRows.length || prompts.length}
+              audioUrl={finalAudioUrl}
+            />
+            <FinalAudio
+              audioUrl={finalAudioUrl}
+              isGenerating={isGeneratingAudio}
+              error={finalAudioError}
+              onDurationChange={setFinalAudioDuration}
+            />
+            {finalAudioDuration > 0 ? (
+              <p className="m-0 text-xs font-medium text-neutral-500">
+                Final audio duration: {finalAudioDuration.toFixed(1)}s
+              </p>
+            ) : null}
+          </div>
+        </aside>
+
+        <section className="min-h-0 overflow-hidden border-l border-neutral-200">
           <Search
             rows={searchRows}
             isSearching={isSearching}
@@ -316,41 +371,19 @@ export const StudioClient = ({ queryId }: StudioClientProps) => {
             }
           />
         </section>
-
-        <aside className="min-h-0 overflow-y-auto bg-white/80 px-5 py-8">
-          <div className="grid gap-8">
-            <FinalAudio
-              audioUrl={finalAudioUrl}
-              isGenerating={isGeneratingAudio}
-              error={finalAudioError}
-              onDurationChange={setFinalAudioDuration}
-            />
-            <FinalVideo
-              clips={selectedClips}
-              apiBaseUrl={INDEX_API_BASE_URL}
-              expectedClipCount={searchRows.length || prompts.length}
-              audioUrl={finalAudioUrl}
-            />
-            {finalAudioDuration > 0 ? (
-              <p className="m-0 text-xs font-medium text-neutral-500">
-                Final audio duration: {finalAudioDuration.toFixed(1)}s
-              </p>
-            ) : null}
-          </div>
-        </aside>
       </div>
 
-      <div className="border-t border-neutral-200 bg-[#f7f6f2]/95 px-5 py-3 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl items-end gap-3 rounded-[2rem] border border-neutral-200 bg-white p-3 shadow-sm">
-          <textarea
-            className="max-h-24 min-h-11 flex-1 resize-none border-0 bg-transparent px-3 py-2 text-sm leading-6 text-neutral-950 outline-none"
-            readOnly
-            value={queryText}
-          />
-          <Button className="size-11 rounded-full px-0" disabled>
-            <ArrowUp className="size-5" />
-          </Button>
-        </div>
+      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-20 px-5 pb-5">
+        <PromptBar
+          className="pointer-events-auto mx-auto max-w-5xl"
+          textareaClassName="max-h-24 text-sm"
+          value={queryText}
+          placeholder='[{"visual_broll":"close-up of product in sunlight","transcript":"..."}]'
+          disabled={!queryText.trim()}
+          isSubmitting={isSubmittingPrompt}
+          onChange={setQueryText}
+          onSubmit={() => void submitPrompt()}
+        />
       </div>
     </main>
   );

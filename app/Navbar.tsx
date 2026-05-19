@@ -2,6 +2,7 @@
 
 import Image from "next/image";
 import { useRouter } from "next/navigation";
+import { History } from "lucide-react";
 
 type NavbarProps = {
   isAuthenticated: boolean;
@@ -25,6 +26,15 @@ export const Navbar = ({ isAuthenticated }: NavbarProps) => {
         Home
       </button>
       <div className="flex items-center gap-5">
+        <button
+          className="enabled:hover:text-neutral-950 disabled:cursor-not-allowed disabled:opacity-40"
+          type="button"
+          disabled={!isAuthenticated}
+          onClick={() => router.push("/history")}
+          aria-label="History"
+        >
+          <History className="size-4" />
+        </button>
         <button
           className="underline-offset-4 enabled:hover:text-neutral-950 enabled:hover:underline disabled:cursor-not-allowed disabled:opacity-40"
           type="button"

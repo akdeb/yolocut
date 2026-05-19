@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { upload } from "@vercel/blob/client";
 import { ExternalLink } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { type PutBlobResult } from "@vercel/blob";
 import { CreateHome } from "./CreateHome";
 import { FinalAudio } from "./FinalAudio";
@@ -172,17 +171,15 @@ const getIndexStatusDescription = (status: IndexJobStatus) => {
 };
 
 const parseVisualBrollPrompts = (value: string): VisualBrollPrompt[] => {
-  let parsed: unknown;
+  let parsedValue: unknown;
 
   try {
-    parsed = JSON.parse(value) as unknown;
+    parsedValue = JSON.parse(value) as unknown;
   } catch {
     throw new Error("Brief must be valid JSON.");
   }
 
-  if (!Array.isArray(parsed)) {
-    throw new Error("Brief must be a JSON array of visual_broll objects.");
-  }
+  const parsed = Array.isArray(parsedValue) ? parsedValue : [parsedValue];
 
   if (parsed.length > MAX_BRIEF_ITEMS) {
     throw new Error(`Brief can include at most ${MAX_BRIEF_ITEMS} items.`);
@@ -227,7 +224,6 @@ const parseVisualBrollPrompts = (value: string): VisualBrollPrompt[] => {
 };
 
 const YolocutPage = () => {
-  const router = useRouter();
   const [brief, setBrief] = useState("");
   const [clips, setClips] = useState<BrollClip[]>([]);
   const [isLoadingVideos, setIsLoadingVideos] = useState(true);
@@ -253,10 +249,6 @@ const YolocutPage = () => {
 
   const jobProgressPercent = getProgressPercent(jobStatus?.progress);
 
-  const indexedClipCount = useMemo(() => {
-    return clips.filter((clip) => clip.indexed).length;
-  }, [clips]);
-
   const selectedClips = useMemo(() => {
     return searchRows.flatMap((row) => {
       const selectedResultId = selectedResultIdsByRow[row.id];
@@ -269,20 +261,15 @@ const YolocutPage = () => {
   }, [searchRows, selectedResultIdsByRow]);
 
   const canCreate = useMemo(() => {
-    return brief.trim().length > 0 && indexedClipCount > 1 && !isCreating && !isIndexing;
-  }, [brief, indexedClipCount, isCreating, isIndexing]);
+    return brief.trim().length > 0 && !isCreating;
+  }, [brief, isCreating]);
 
   const unindexedClipCount = useMemo(() => {
     return clips.filter((clip) => !clip.indexed).length;
   }, [clips]);
 
   const canIndex = unindexedClipCount > 0 && !isIndexing && !isLoadingVideos;
-  const shouldShowCreateHome =
-    !isCreating &&
-    searchRows.length === 0 &&
-    !searchError &&
-    !finalAudioUrl &&
-    !finalAudioError;
+  const shouldShowCreateHome = true;
 
   const loadVideos = async () => {
     setIsLoadingVideos(true);
@@ -662,7 +649,7 @@ const YolocutPage = () => {
   };
 
   const handleCreate = async () => {
-    if (!canCreate) {
+    if (isCreating || brief.trim().length === 0) {
       return;
     }
 
@@ -689,7 +676,7 @@ const YolocutPage = () => {
         throw new Error("Query did not return a query_id");
       }
 
-      router.push(`/studio/${queryId}`);
+      window.location.assign(`/studio/${encodeURIComponent(queryId)}`);
     } catch (error) {
       setSearchRows([]);
       setSelectedResultIdsByRow({});
@@ -754,6 +741,7 @@ const YolocutPage = () => {
         apiBaseUrl={INDEX_API_BASE_URL}
         creator={creator}
         creatorOptions={CREATOR_OPTIONS}
+        error={searchError}
         onBriefChange={setBrief}
         onCreatorChange={setCreator}
         onCreate={handleCreate}

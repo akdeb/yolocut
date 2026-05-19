@@ -1,7 +1,6 @@
 /* eslint-disable @remotion/warn-native-media-tag */
 
 import { AlertCircle, Loader2, Volume2 } from "lucide-react";
-import { Card } from "../../src/components/ui/card";
 
 type FinalAudioProps = {
   audioUrl: string;
@@ -23,12 +22,8 @@ export const FinalAudio = ({
           <Volume2 className="size-4" />
           <span>Final audio</span>
         </div>
-        <h2 className="m-0 mt-2 font-serif text-3xl font-bold tracking-[-0.035em] text-neutral-950">
-          Voiceover
-        </h2>
       </div>
 
-      <Card className="p-4">
         {isGenerating ? (
           <div className="flex items-center gap-3 text-sm font-medium text-neutral-600">
             <Loader2 className="size-5 animate-spin text-emerald-600" />
@@ -51,7 +46,6 @@ export const FinalAudio = ({
             Create a search to generate the concatenated transcript voiceover.
           </p>
         )}
-      </Card>
     </div>
   );
 };

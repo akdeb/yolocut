@@ -18,6 +18,29 @@ const supabaseHeaders = {
   "Content-Type": "application/json",
 };
 
+export const GET = async () => {
+  const query = new URLSearchParams({
+    select: "query_id,created_at,query_text,broll_jsonb,audio_url,music_url,captions_url",
+    order: "created_at.desc",
+    limit: "30",
+  });
+
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/queries?${query.toString()}`, {
+    headers: supabaseHeaders,
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+
+    return NextResponse.json(
+      { error: errorText || "Failed to load queries" },
+      { status: response.status },
+    );
+  }
+
+  return NextResponse.json({ queries: await response.json() });
+};
+
 export const POST = async (request: Request) => {
   const body = (await request.json()) as CreateQueryRequest;
   const queryText = body.query_text?.trim();

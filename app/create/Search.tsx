@@ -101,7 +101,7 @@ export const Search = ({
     const skeletonRows = Array.from({ length: Math.max(searchPromptCount, 1) });
 
     return (
-      <div className="h-full min-h-0 overflow-y-auto overscroll-contain px-8 py-8">
+      <div className="h-full min-h-0 overflow-y-auto overscroll-contain px-8 py-8 pb-32">
         <div className="grid gap-6">
           <div>
             <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.22em] text-emerald-500">
@@ -177,7 +177,7 @@ export const Search = ({
   }
 
   return (
-    <div className="h-full min-h-0 overflow-y-auto overscroll-contain px-8 py-8">
+    <div className="h-full min-h-0 overflow-y-auto overscroll-contain px-8 py-8 pb-32">
       <div className="grid gap-6">
         <div>
           <p className="m-0 text-xs font-bold uppercase tracking-[0.22em] text-emerald-500">

@@ -1,12 +1,13 @@
 "use client";
 
-/* eslint-disable @remotion/non-pure-animation, @remotion/warn-native-media-tag */
+/* eslint-disable @remotion/warn-native-media-tag */
 
-import { ArrowUp, DatabaseBackup, Loader2, RefreshCw, Upload } from "lucide-react";
+import { DatabaseBackup, Loader2, RefreshCw, Upload } from "lucide-react";
 import Image from "next/image";
 import { useRef } from "react";
 import { Button } from "../../src/components/ui/button";
 import { CreatorSelect } from "./CreatorSelect";
+import { PromptBar } from "./PromptBar";
 
 type BrollClip = {
   id: string;
@@ -29,6 +30,7 @@ type CreateHomeProps = {
   apiBaseUrl: string;
   creator: string;
   creatorOptions: string[];
+  error: string;
   onBriefChange: (value: string) => void;
   onCreatorChange: (value: string) => void;
   onCreate: () => void;
@@ -61,6 +63,7 @@ export const CreateHome = ({
   apiBaseUrl,
   creator,
   creatorOptions,
+  error,
   onBriefChange,
   onCreatorChange,
   onCreate,
@@ -95,29 +98,19 @@ export const CreateHome = ({
             </p>
           </div>
 
-          <div className="flex w-full max-w-3xl items-end gap-3 rounded-[2rem] border border-neutral-200 bg-white p-3 shadow-sm focus-within:border-emerald-300 focus-within:ring-4 focus-within:ring-emerald-100">
-            <textarea
-              className="max-h-28 min-h-12 flex-1 resize-none border-0 bg-transparent px-3 py-2 text-base leading-6 text-neutral-950 outline-none placeholder:text-neutral-400"
-              value={brief}
-              onChange={(event) => onBriefChange(event.target.value)}
-              placeholder='Lets make a viral hit...'
-              onKeyDown={(event) => {
-                if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
-                  event.preventDefault();
-                  onCreate();
-                }
-              }}
-            />
-            <button
-              className="mb-1 flex size-11 shrink-0 items-center justify-center rounded-full bg-neutral-950 text-white shadow-sm transition-colors disabled:cursor-not-allowed disabled:opacity-35"
-              type="button"
-              disabled={!canCreate || isCreating}
-              onClick={onCreate}
-              aria-label="Create"
-            >
-              {isCreating ? <Loader2 className="size-5 animate-spin" /> : <ArrowUp className="size-5" />}
-            </button>
-          </div>
+          <PromptBar
+            className="max-w-3xl"
+            value={brief}
+            disabled={!canCreate}
+            isSubmitting={isCreating}
+            onChange={onBriefChange}
+            onSubmit={onCreate}
+          />
+          {error ? (
+            <p className="m-0 w-full max-w-3xl rounded-2xl bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+              {error}
+            </p>
+          ) : null}
         </div>
       </section>
 

@@ -1,9 +1,8 @@
 /* eslint-disable @remotion/warn-native-media-tag */
 
 import { Clock3, Film, ListVideo, Pause, Play, Scissors, Square } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../src/components/ui/button";
-import { Card } from "../../src/components/ui/card";
 import { type SearchClipResult, resolveSourceUrl } from "./Search";
 
 type FinalVideoProps = {
@@ -26,20 +25,24 @@ const formatTime = (seconds: number) => {
 };
 
 export const FinalVideo = ({ clips, apiBaseUrl, expectedClipCount, audioUrl }: FinalVideoProps) => {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const nextVideoRef = useRef<HTMLVideoElement>(null);
+  const primaryVideoRef = useRef<HTMLVideoElement>(null);
+  const secondaryVideoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [activeSlot, setActiveSlot] = useState<0 | 1>(0);
   const [isPlayingSequence, setIsPlayingSequence] = useState(false);
   const [sequenceElapsed, setSequenceElapsed] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
+  const activeSlotRef = useRef<0 | 1>(0);
+  const currentIndexRef = useRef(0);
 
   const currentClip = clips[currentIndex] ?? null;
-  const nextClip = clips[currentIndex + 1] ?? null;
   const currentClipUrl = currentClip ? resolveSourceUrl(currentClip, apiBaseUrl) : null;
-  const nextClipUrl = nextClip ? resolveSourceUrl(nextClip, apiBaseUrl) : null;
   const expectedClips = Math.max(expectedClipCount, clips.length);
   const missingClipCount = Math.max(0, expectedClips - clips.length);
+  const clipUrls = useMemo(() => {
+    return clips.map((clip) => resolveSourceUrl(clip, apiBaseUrl));
+  }, [apiBaseUrl, clips]);
   const brollDuration = useMemo(() => {
     return clips.reduce((duration, clip) => duration + getClipDuration(clip), 0);
   }, [clips]);
@@ -51,11 +54,46 @@ export const FinalVideo = ({ clips, apiBaseUrl, expectedClipCount, audioUrl }: F
   }, [clips, currentIndex]);
   const progressPercent = totalDuration > 0 ? (sequenceElapsed / totalDuration) * 100 : 0;
 
+  const getVideoElement = useCallback((slot: 0 | 1) => {
+    return slot === 0 ? primaryVideoRef.current : secondaryVideoRef.current;
+  }, []);
+
+  const prepareVideo = useCallback((slot: 0 | 1, clipIndex: number) => {
+    const video = getVideoElement(slot);
+    const clip = clips[clipIndex];
+    const clipUrl = clipUrls[clipIndex];
+
+    if (!video || !clip || !clipUrl) {
+      if (video) {
+        video.removeAttribute("src");
+        video.removeAttribute("data-clip-index");
+        video.load();
+      }
+      return;
+    }
+
+    const nextClipIndex = String(clipIndex);
+    if (video.dataset.clipIndex !== nextClipIndex || video.getAttribute("src") !== clipUrl) {
+      video.dataset.clipIndex = nextClipIndex;
+      video.src = clipUrl;
+      video.load();
+    }
+
+    if (video.readyState >= HTMLMediaElement.HAVE_METADATA) {
+      video.currentTime = clip.start_time;
+    }
+  }, [clipUrls, clips, getVideoElement]);
+
   const playSequence = () => {
     if (clips.length === 0 && !audioUrl) {
       return;
     }
 
+    prepareVideo(0, 0);
+    prepareVideo(1, 1);
+    activeSlotRef.current = 0;
+    currentIndexRef.current = 0;
+    setActiveSlot(0);
     setCurrentIndex(0);
     setSequenceElapsed(0);
     if (audioRef.current) {
@@ -66,25 +104,46 @@ export const FinalVideo = ({ clips, apiBaseUrl, expectedClipCount, audioUrl }: F
   };
 
   const stopSequence = () => {
-    videoRef.current?.pause();
+    primaryVideoRef.current?.pause();
+    secondaryVideoRef.current?.pause();
     audioRef.current?.pause();
     setIsPlayingSequence(false);
   };
 
   const advanceClip = () => {
-    if (currentIndex < clips.length - 1) {
-      const nextIndex = currentIndex + 1;
+    const activeVideo = getVideoElement(activeSlotRef.current);
+    const nextIndex = currentIndexRef.current + 1;
+
+    if (nextIndex < clips.length) {
+      const nextSlot = activeSlotRef.current === 0 ? 1 : 0;
       const nextElapsed = clips
         .slice(0, nextIndex)
         .reduce((duration, clip) => duration + getClipDuration(clip), 0);
 
+      activeVideo?.pause();
+      prepareVideo(nextSlot, nextIndex);
+      prepareVideo(activeSlotRef.current, nextIndex + 1);
+      activeSlotRef.current = nextSlot;
+      currentIndexRef.current = nextIndex;
+      setActiveSlot(nextSlot);
       setSequenceElapsed(nextElapsed);
       setCurrentIndex(nextIndex);
+      window.requestAnimationFrame(() => {
+        if (isPlayingSequence) {
+          const nextVideo = getVideoElement(nextSlot);
+          if (nextVideo) {
+            void nextVideo.play().catch(() => setIsPlayingSequence(false));
+          }
+        }
+      });
       return;
     }
 
-    videoRef.current?.pause();
-    setCurrentIndex(clips.length);
+    activeVideo?.pause();
+    const finalClip = clips[currentIndexRef.current];
+    if (activeVideo && finalClip) {
+      activeVideo.currentTime = Math.max(finalClip.start_time, finalClip.end_time - 0.05);
+    }
     if (!audioUrl) {
       setSequenceElapsed(totalDuration);
       setIsPlayingSequence(false);
@@ -97,30 +156,37 @@ export const FinalVideo = ({ clips, apiBaseUrl, expectedClipCount, audioUrl }: F
       .reduce((duration, clip) => duration + getClipDuration(clip), 0);
 
     setCurrentIndex(index);
+    currentIndexRef.current = index;
+    activeSlotRef.current = 0;
+    setActiveSlot(0);
     setSequenceElapsed(elapsed);
   };
 
   useEffect(() => {
-    const video = videoRef.current;
+    activeSlotRef.current = activeSlot;
+  }, [activeSlot]);
 
-    if (!video || !currentClip || !currentClipUrl) {
+  useEffect(() => {
+    currentIndexRef.current = currentIndex;
+  }, [currentIndex]);
+
+  useEffect(() => {
+    prepareVideo(activeSlot, currentIndex);
+    prepareVideo(activeSlot === 0 ? 1 : 0, currentIndex + 1);
+
+    if (!isPlayingSequence) {
       return;
     }
 
-    if (video.getAttribute("src") !== currentClipUrl) {
-      video.setAttribute("src", currentClipUrl);
-      video.load();
-      return;
+    const activeVideo = getVideoElement(activeSlot);
+    if (activeVideo) {
+      void activeVideo.play().catch(() => setIsPlayingSequence(false));
     }
-
-    video.currentTime = currentClip.start_time;
-    if (isPlayingSequence) {
-      void video.play().catch(() => setIsPlayingSequence(false));
-    }
-  }, [currentClip, currentClipUrl, isPlayingSequence]);
+  }, [activeSlot, currentIndex, isPlayingSequence, prepareVideo, getVideoElement]);
 
   useEffect(() => {
     setCurrentIndex(0);
+    setActiveSlot(0);
     setSequenceElapsed(0);
     setIsPlayingSequence(false);
   }, [clips]);
@@ -139,102 +205,154 @@ export const FinalVideo = ({ clips, apiBaseUrl, expectedClipCount, audioUrl }: F
             <Scissors className="size-4" />
             <span>Final video</span>
           </div>
-          <h2 className="m-0 mt-2 font-serif text-3xl font-bold tracking-[-0.035em] text-neutral-950">
-            Selected sequence
-          </h2>
-          <p className="m-0 mt-2 text-sm leading-6 text-neutral-500">
-            Plays the selected clip from each prompt in order using the matched source ranges.
-          </p>
         </div>
 
-        <Card className="overflow-hidden">
-          <div className="relative aspect-video bg-neutral-950">
-            {currentClip && currentClipUrl ? (
-              <video
-                ref={videoRef}
-                className="size-full object-cover"
-                preload="metadata"
-                muted
-                playsInline
-                onLoadedMetadata={() => {
-                  if (videoRef.current && currentClip) {
-                    videoRef.current.currentTime = currentClip.start_time;
-                    if (isPlayingSequence) {
-                      void videoRef.current.play().catch(() => setIsPlayingSequence(false));
+          <div className="relative w-full max-w-[310px] rounded-[2.35rem] border-[10px] border-neutral-950 bg-neutral-950 p-1 shadow-2xl">
+            <div className="absolute left-1/2 top-2 z-10 h-5 w-24 -translate-x-1/2 rounded-full bg-neutral-950" />
+            <div className="relative aspect-[9/16] overflow-hidden rounded-[1.55rem] bg-neutral-950">
+              {currentClip && currentClipUrl ? (
+                <video
+                  ref={primaryVideoRef}
+                  className={
+                    activeSlot === 0
+                      ? "absolute inset-0 size-full object-cover opacity-100"
+                      : "absolute inset-0 size-full object-cover opacity-0"
+                  }
+                  preload="auto"
+                  muted
+                  playsInline
+                  onLoadedMetadata={(event) => {
+                    const clipIndex = Number(event.currentTarget.dataset.clipIndex ?? "-1");
+                    const loadedClip = clips[clipIndex];
+                    if (loadedClip) {
+                      event.currentTarget.currentTime = loadedClip.start_time;
+                      if (activeSlot === 0 && isPlayingSequence) {
+                        void event.currentTarget.play().catch(() => setIsPlayingSequence(false));
+                      }
                     }
-                  }
-                }}
-                onTimeUpdate={(event) => {
-                  const clipElapsed = Math.max(0, event.currentTarget.currentTime - currentClip.start_time);
-                  if (!audioUrl) {
-                    setSequenceElapsed(
-                      Math.min(totalDuration, elapsedBeforeCurrentClip + clipElapsed),
-                    );
-                  }
-
-                  if (event.currentTarget.currentTime >= currentClip.end_time - 0.03) {
-                    advanceClip();
-                  }
-                }}
-                onEnded={advanceClip}
-              />
-            ) : (
-              <div className="flex size-full flex-col items-center justify-center px-6 text-center text-sm font-medium text-white/70">
-                <div className="mb-3 flex size-12 items-center justify-center rounded-full bg-white/10">
-                  <Film className="size-6" />
-                </div>
-                {audioUrl && isPlayingSequence
-                  ? "B-roll finished. Voiceover continues on black."
-                  : "Select search results to preview the stitched sequence."}
-              </div>
-            )}
-            {nextClipUrl ? <video ref={nextVideoRef} className="hidden" src={nextClipUrl} preload="auto" muted /> : null}
-            {audioUrl ? (
-              <audio
-                ref={audioRef}
-                src={audioUrl}
-                preload="metadata"
-                onLoadedMetadata={(event) => setAudioDuration(event.currentTarget.duration)}
-                onTimeUpdate={(event) => setSequenceElapsed(event.currentTarget.currentTime)}
-                onEnded={() => {
-                  videoRef.current?.pause();
-                  setSequenceElapsed(totalDuration);
-                  setIsPlayingSequence(false);
-                }}
-              />
-            ) : null}
-
-            <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-4 pb-3 pt-10 text-white">
-              <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-white/25">
-                <div
-                  className="h-full rounded-full bg-emerald-300"
-                  style={{ width: `${Math.max(0, Math.min(100, progressPercent))}%` }}
-                />
-              </div>
-              <div className="flex items-center justify-between gap-3 text-sm font-semibold">
-                <button
-                  className="flex h-9 min-w-16 items-center gap-1.5 rounded-full bg-white px-3 text-neutral-950"
-                  type="button"
-                  disabled={clips.length === 0 && !audioUrl}
-                  onClick={() => {
-                    if (isPlayingSequence) {
-                      stopSequence();
+                  }}
+                  onTimeUpdate={(event) => {
+                    if (activeSlot !== 0 || !currentClip) {
                       return;
                     }
 
-                    if (audioRef.current) {
-                      void audioRef.current.play().catch(() => setIsPlayingSequence(false));
+                    const clipElapsed = Math.max(
+                      0,
+                      event.currentTarget.currentTime - currentClip.start_time,
+                    );
+                    if (!audioUrl) {
+                      setSequenceElapsed(
+                        Math.min(totalDuration, elapsedBeforeCurrentClip + clipElapsed),
+                      );
                     }
-                    setIsPlayingSequence(true);
+
+                    if (event.currentTarget.currentTime >= currentClip.end_time - 0.03) {
+                      advanceClip();
+                    }
                   }}
-                >
-                  {isPlayingSequence ? <Pause className="size-4" /> : <Play className="size-4" />}
-                  {isPlayingSequence ? "Pause" : "Play"}
-                </button>
-                <span className="flex items-center gap-1.5">
-                  <Clock3 className="size-4" />
-                  {formatTime(sequenceElapsed)} / {formatTime(totalDuration)}
-                </span>
+                  onEnded={advanceClip}
+                />
+              ) : (
+                <div className="flex size-full flex-col items-center justify-center px-6 text-center text-sm font-medium text-white/70">
+                  <div className="mb-3 flex size-12 items-center justify-center rounded-full bg-white/10">
+                    <Film className="size-6" />
+                  </div>
+                  {audioUrl && isPlayingSequence
+                    ? "B-roll finished. Voiceover continues on black."
+                    : "Select search results to preview the stitched sequence."}
+                </div>
+              )}
+              {currentClip && currentClipUrl ? (
+                <video
+                  ref={secondaryVideoRef}
+                  className={
+                    activeSlot === 1
+                      ? "absolute inset-0 size-full object-cover opacity-100"
+                      : "absolute inset-0 size-full object-cover opacity-0"
+                  }
+                  preload="auto"
+                  muted
+                  playsInline
+                  onLoadedMetadata={(event) => {
+                    const clipIndex = Number(event.currentTarget.dataset.clipIndex ?? "-1");
+                    const loadedClip = clips[clipIndex];
+                    if (loadedClip) {
+                      event.currentTarget.currentTime = loadedClip.start_time;
+                      if (activeSlot === 1 && isPlayingSequence) {
+                        void event.currentTarget.play().catch(() => setIsPlayingSequence(false));
+                      }
+                    }
+                  }}
+                  onTimeUpdate={(event) => {
+                    if (activeSlot !== 1 || !currentClip) {
+                      return;
+                    }
+
+                    const clipElapsed = Math.max(
+                      0,
+                      event.currentTarget.currentTime - currentClip.start_time,
+                    );
+                    if (!audioUrl) {
+                      setSequenceElapsed(
+                        Math.min(totalDuration, elapsedBeforeCurrentClip + clipElapsed),
+                      );
+                    }
+
+                    if (event.currentTarget.currentTime >= currentClip.end_time - 0.08) {
+                      advanceClip();
+                    }
+                  }}
+                  onEnded={advanceClip}
+                />
+              ) : null}
+              {audioUrl ? (
+                <audio
+                  ref={audioRef}
+                  src={audioUrl}
+                  preload="metadata"
+                  onLoadedMetadata={(event) => setAudioDuration(event.currentTarget.duration)}
+                  onTimeUpdate={(event) => setSequenceElapsed(event.currentTarget.currentTime)}
+                  onEnded={() => {
+                    primaryVideoRef.current?.pause();
+                    secondaryVideoRef.current?.pause();
+                    setSequenceElapsed(totalDuration);
+                    setIsPlayingSequence(false);
+                  }}
+                />
+              ) : null}
+
+              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent px-4 pb-4 pt-14 text-white">
+                <div className="mb-2 h-1.5 overflow-hidden rounded-full bg-white/25">
+                  <div
+                    className="h-full rounded-full bg-emerald-300"
+                    style={{ width: `${Math.max(0, Math.min(100, progressPercent))}%` }}
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-3 text-xs font-semibold">
+                  <button
+                    className="flex h-9 min-w-16 items-center gap-1.5 rounded-full bg-white px-3 text-neutral-950"
+                    type="button"
+                    disabled={clips.length === 0 && !audioUrl}
+                    onClick={() => {
+                      if (isPlayingSequence) {
+                        stopSequence();
+                        return;
+                      }
+
+                      if (audioRef.current) {
+                        void audioRef.current.play().catch(() => setIsPlayingSequence(false));
+                      }
+                      setIsPlayingSequence(true);
+                    }}
+                  >
+                    {isPlayingSequence ? <Pause className="size-4" /> : <Play className="size-4" />}
+                    {isPlayingSequence ? "Pause" : "Play"}
+                  </button>
+                  <span className="flex items-center gap-1.5">
+                    <Clock3 className="size-4" />
+                    {formatTime(sequenceElapsed)} / {formatTime(totalDuration)}
+                  </span>
+                </div>
               </div>
             </div>
           </div>
@@ -275,7 +393,6 @@ export const FinalVideo = ({ clips, apiBaseUrl, expectedClipCount, audioUrl }: F
               </p>
             ) : null}
           </div>
-        </Card>
 
         {clips.length > 0 ? (
           <div className="grid gap-2">
