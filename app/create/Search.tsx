@@ -35,6 +35,20 @@ type SearchProps = {
 
 const resolveApiUrl = (url: string, apiBaseUrl: string) => {
   if (url.startsWith("http://") || url.startsWith("https://")) {
+    try {
+      const parsedUrl = new URL(url);
+
+      if (parsedUrl.hostname.endsWith(".blob.vercel-storage.com")) {
+        return `/api/broll-video?pathname=${encodeURIComponent(parsedUrl.pathname.replace(/^\/+/, ""))}`;
+      }
+    } catch {
+      return url;
+    }
+
+    return url;
+  }
+
+  if (url.startsWith("/api/")) {
     return url;
   }
 
@@ -46,6 +60,14 @@ export const getSearchResultId = (result: SearchClipResult) => {
 };
 
 export const resolveSourceUrl = (result: SearchClipResult, apiBaseUrl: string) => {
+  if (result.clip_stream_url) {
+    return resolveApiUrl(result.clip_stream_url, apiBaseUrl);
+  }
+
+  if (result.clip_url) {
+    return resolveApiUrl(result.clip_url, apiBaseUrl);
+  }
+
   if (!result.source_file) {
     return null;
   }

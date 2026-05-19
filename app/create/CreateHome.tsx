@@ -203,10 +203,8 @@ export const CreateHome = ({
                         <video
                           className="size-full object-cover"
                           src={getClipAssetUrl(clip.url, apiBaseUrl)}
-                          autoPlay
-                          loop
                           muted
-                          preload="auto"
+                          preload="metadata"
                           playsInline
                         />
                         {clip.indexed ? (
@@ -233,7 +231,7 @@ export const CreateHome = ({
                           {clip.name}
                         </strong>
                         {clip.creator ? (
-                          <span className="w-fit rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] font-bold text-neutral-600">
+                          <span className="w-fit overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] font-bold text-neutral-600">
                             {clip.creator}
                           </span>
                         ) : null}

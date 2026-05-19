@@ -275,10 +275,8 @@ export const Query = ({
                       <video
                         className="size-full object-cover"
                         src={getClipAssetUrl(clip.url, apiBaseUrl)}
-                        autoPlay
-                        loop
                         muted
-                        preload="auto"
+                        preload="metadata"
                         playsInline
                       />
                       {clip.indexed ? (

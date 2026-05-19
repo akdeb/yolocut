@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { upload } from "@vercel/blob/client";
 import { ExternalLink } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { type PutBlobResult } from "@vercel/blob";
 import { CreateHome } from "./CreateHome";
 import { FinalAudio } from "./FinalAudio";
@@ -13,7 +14,6 @@ import {
   Search,
   getSearchResultId,
   resolveSourceUrl,
-  type SearchClipResult,
   type SearchRow,
 } from "./Search";
 import { Button } from "../../src/components/ui/button";
@@ -73,15 +73,6 @@ type IndexJobStatus = {
 type VisualBrollPrompt = {
   visual_broll: string;
   transcript?: string;
-};
-
-type BatchSearchResponse = {
-  rows: Array<{
-    index: number;
-    visual_broll: string;
-    query?: string;
-    results: SearchClipResult[];
-  }>;
 };
 
 const DEFAULT_INDEX_API_BASE_URL =
@@ -236,6 +227,7 @@ const parseVisualBrollPrompts = (value: string): VisualBrollPrompt[] => {
 };
 
 const YolocutPage = () => {
+  const router = useRouter();
   const [brief, setBrief] = useState("");
   const [clips, setClips] = useState<BrollClip[]>([]);
   const [isLoadingVideos, setIsLoadingVideos] = useState(true);
@@ -245,13 +237,13 @@ const YolocutPage = () => {
   const [jobStatus, setJobStatus] = useState<IndexJobStatus | null>(null);
   const [searchRows, setSearchRows] = useState<SearchRow[]>([]);
   const [selectedResultIdsByRow, setSelectedResultIdsByRow] = useState<Record<string, string>>({});
-  const [searchPromptCount, setSearchPromptCount] = useState(0);
+  const [searchPromptCount] = useState(0);
   const [searchError, setSearchError] = useState("");
-  const [finalAudioUrl, setFinalAudioUrl] = useState("");
+  const [finalAudioUrl] = useState("");
   const [finalAudioDuration, setFinalAudioDuration] = useState(0);
   const [finalAudioError, setFinalAudioError] = useState("");
   const [editError, setEditError] = useState("");
-  const [isGeneratingAudio, setIsGeneratingAudio] = useState(false);
+  const [isGeneratingAudio] = useState(false);
   const [isOpeningEditor, setIsOpeningEditor] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [uploadPrefix, setUploadPrefix] = useState("");
@@ -675,89 +667,35 @@ const YolocutPage = () => {
     }
 
     setIsCreating(true);
-    setIsGeneratingAudio(true);
     setSearchError("");
     setFinalAudioError("");
-    if (finalAudioUrl) {
-      URL.revokeObjectURL(finalAudioUrl);
-      setFinalAudioUrl("");
-    }
-    setFinalAudioDuration(0);
     try {
-      const prompts = parseVisualBrollPrompts(brief);
-      setSearchPromptCount(prompts.length);
-
-      const searchRequest = fetch(`${INDEX_API_BASE_URL}/search/batch`, {
+      parseVisualBrollPrompts(brief);
+      const response = await fetch("/api/queries", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          items: prompts.map((prompt) => ({ visual_broll: prompt.visual_broll })),
-          results: 5,
-          save_top: 5,
-          trim: true,
-          force_trim_low_confidence: true,
-          backend: "gemini",
-        }),
-      }).then(async (response) => {
-        if (!response.ok) {
-          throw new Error("Batch search failed");
-        }
-
-        return (await response.json()) as BatchSearchResponse;
+        body: JSON.stringify({ query_text: brief.trim() }),
       });
 
-      const transcript = prompts
-        .map((prompt) => prompt.transcript)
-        .filter((line): line is string => Boolean(line))
-        .join("\n\n");
-      const audioRequest = transcript
-        ? fetch("/api/final-audio", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ transcript }),
-          }).then(async (response) => {
-            if (!response.ok) {
-              const error = (await response.json().catch(() => null)) as { error?: string } | null;
-              throw new Error(error?.error ?? "Final audio generation failed");
-            }
-
-            return URL.createObjectURL(await response.blob());
-          })
-        : Promise.reject(new Error("No transcript text found for final audio."));
-
-      const [searchResult, audioResult] = await Promise.allSettled([searchRequest, audioRequest]);
-
-      if (audioResult.status === "fulfilled") {
-        setFinalAudioUrl(audioResult.value);
-      } else {
-        setFinalAudioError(audioResult.reason instanceof Error ? audioResult.reason.message : "Final audio generation failed");
+      if (!response.ok) {
+        const error = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(error?.error ?? "Failed to create query");
       }
 
-      if (searchResult.status === "rejected") {
-        throw searchResult.reason;
+      const data = (await response.json()) as { query?: { query_id?: string } | null };
+      const queryId = data.query?.query_id;
+
+      if (!queryId) {
+        throw new Error("Query did not return a query_id");
       }
 
-      const data = searchResult.value;
-      const nextRows = data.rows.map((row) => ({
-        id: `${row.index}-${row.visual_broll}`,
-        query: row.query ?? row.visual_broll,
-        results: row.results.slice(0, 5),
-      }));
-      const nextSelectedResultIdsByRow = Object.fromEntries(
-        nextRows
-          .filter((row) => row.results[0])
-          .map((row) => [row.id, getSearchResultId(row.results[0])]),
-      );
-
-      setSearchRows(nextRows);
-      setSelectedResultIdsByRow(nextSelectedResultIdsByRow);
+      router.push(`/studio/${queryId}`);
     } catch (error) {
       setSearchRows([]);
       setSelectedResultIdsByRow({});
-      setSearchError(error instanceof Error ? error.message : "Failed to search b-roll");
+      setSearchError(error instanceof Error ? error.message : "Failed to create query");
     } finally {
       setIsCreating(false);
-      setIsGeneratingAudio(false);
     }
   };
 
