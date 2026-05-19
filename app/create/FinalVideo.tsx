@@ -24,6 +24,11 @@ const formatTime = (seconds: number) => {
   return `${minutes}:${remainingSeconds.toString().padStart(2, "0")}`;
 };
 
+type MemoryClip = {
+  status: "loading" | "ready" | "error";
+  url: string;
+};
+
 export const FinalVideo = ({ clips, apiBaseUrl, expectedClipCount, audioUrl }: FinalVideoProps) => {
   const primaryVideoRef = useRef<HTMLVideoElement>(null);
   const secondaryVideoRef = useRef<HTMLVideoElement>(null);
@@ -33,8 +38,10 @@ export const FinalVideo = ({ clips, apiBaseUrl, expectedClipCount, audioUrl }: F
   const [isPlayingSequence, setIsPlayingSequence] = useState(false);
   const [sequenceElapsed, setSequenceElapsed] = useState(0);
   const [audioDuration, setAudioDuration] = useState(0);
+  const [memoryClips, setMemoryClips] = useState<Record<number, MemoryClip>>({});
   const activeSlotRef = useRef<0 | 1>(0);
   const currentIndexRef = useRef(0);
+  const isPlayingSequenceRef = useRef(false);
 
   const currentClip = clips[currentIndex] ?? null;
   const currentClipUrl = currentClip ? resolveSourceUrl(currentClip, apiBaseUrl) : null;
@@ -43,6 +50,12 @@ export const FinalVideo = ({ clips, apiBaseUrl, expectedClipCount, audioUrl }: F
   const clipUrls = useMemo(() => {
     return clips.map((clip) => resolveSourceUrl(clip, apiBaseUrl));
   }, [apiBaseUrl, clips]);
+  const playableClipUrls = useMemo(() => {
+    return clipUrls.map((url, index) => memoryClips[index]?.url ?? url);
+  }, [clipUrls, memoryClips]);
+  const loadedClipCount = clipUrls.filter((url, index) => !url || memoryClips[index]?.status === "ready").length;
+  const isPreloadingClips = clips.length > 0 && loadedClipCount < clips.length;
+  const canPlaySequence = (clips.length === 0 && Boolean(audioUrl)) || (clips.length > 0 && !isPreloadingClips);
   const brollDuration = useMemo(() => {
     return clips.reduce((duration, clip) => duration + getClipDuration(clip), 0);
   }, [clips]);
@@ -61,7 +74,7 @@ export const FinalVideo = ({ clips, apiBaseUrl, expectedClipCount, audioUrl }: F
   const prepareVideo = useCallback((slot: 0 | 1, clipIndex: number) => {
     const video = getVideoElement(slot);
     const clip = clips[clipIndex];
-    const clipUrl = clipUrls[clipIndex];
+    const clipUrl = playableClipUrls[clipIndex];
 
     if (!video || !clip || !clipUrl) {
       if (video) {
@@ -82,10 +95,10 @@ export const FinalVideo = ({ clips, apiBaseUrl, expectedClipCount, audioUrl }: F
     if (video.readyState >= HTMLMediaElement.HAVE_METADATA) {
       video.currentTime = clip.start_time;
     }
-  }, [clipUrls, clips, getVideoElement]);
+  }, [clips, getVideoElement, playableClipUrls]);
 
   const playSequence = () => {
-    if (clips.length === 0 && !audioUrl) {
+    if (!canPlaySequence) {
       return;
     }
 
@@ -99,6 +112,10 @@ export const FinalVideo = ({ clips, apiBaseUrl, expectedClipCount, audioUrl }: F
     if (audioRef.current) {
       audioRef.current.currentTime = 0;
       void audioRef.current.play().catch(() => setIsPlayingSequence(false));
+    }
+    const activeVideo = getVideoElement(0);
+    if (activeVideo) {
+      void activeVideo.play().catch(() => setIsPlayingSequence(false));
     }
     setIsPlayingSequence(true);
   };
@@ -129,7 +146,7 @@ export const FinalVideo = ({ clips, apiBaseUrl, expectedClipCount, audioUrl }: F
       setSequenceElapsed(nextElapsed);
       setCurrentIndex(nextIndex);
       window.requestAnimationFrame(() => {
-        if (isPlayingSequence) {
+        if (isPlayingSequenceRef.current) {
           const nextVideo = getVideoElement(nextSlot);
           if (nextVideo) {
             void nextVideo.play().catch(() => setIsPlayingSequence(false));
@@ -167,6 +184,10 @@ export const FinalVideo = ({ clips, apiBaseUrl, expectedClipCount, audioUrl }: F
   }, [activeSlot]);
 
   useEffect(() => {
+    isPlayingSequenceRef.current = isPlayingSequence;
+  }, [isPlayingSequence]);
+
+  useEffect(() => {
     currentIndexRef.current = currentIndex;
   }, [currentIndex]);
 
@@ -190,6 +211,62 @@ export const FinalVideo = ({ clips, apiBaseUrl, expectedClipCount, audioUrl }: F
     setSequenceElapsed(0);
     setIsPlayingSequence(false);
   }, [clips]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const objectUrls: string[] = [];
+    const abortController = new AbortController();
+
+    setMemoryClips({});
+
+    clipUrls.forEach((clipUrl, index) => {
+      if (!clipUrl) {
+        return;
+      }
+
+      setMemoryClips((current) => ({
+        ...current,
+        [index]: { status: "loading", url: clipUrl },
+      }));
+
+      void fetch(clipUrl, { signal: abortController.signal })
+        .then(async (response) => {
+          if (!response.ok) {
+            throw new Error(`Failed to preload clip ${index + 1}`);
+          }
+
+          return response.blob();
+        })
+        .then((blob) => {
+          if (!isMounted) {
+            return;
+          }
+
+          const objectUrl = URL.createObjectURL(blob);
+          objectUrls.push(objectUrl);
+          setMemoryClips((current) => ({
+            ...current,
+            [index]: { status: "ready", url: objectUrl },
+          }));
+        })
+        .catch(() => {
+          if (!isMounted || abortController.signal.aborted) {
+            return;
+          }
+
+          setMemoryClips((current) => ({
+            ...current,
+            [index]: { status: "error", url: clipUrl },
+          }));
+        });
+    });
+
+    return () => {
+      isMounted = false;
+      abortController.abort();
+      objectUrls.forEach((objectUrl) => URL.revokeObjectURL(objectUrl));
+    };
+  }, [clipUrls]);
 
   useEffect(() => {
     setAudioDuration(0);
@@ -259,7 +336,9 @@ export const FinalVideo = ({ clips, apiBaseUrl, expectedClipCount, audioUrl }: F
                   </div>
                   {audioUrl && isPlayingSequence
                     ? "B-roll finished. Voiceover continues on black."
-                    : "Select search results to preview the stitched sequence."}
+                    : isPreloadingClips
+                      ? `Preloading ${loadedClipCount}/${clips.length} clips into memory...`
+                      : "Select search results to preview the stitched sequence."}
                 </div>
               )}
               {currentClip && currentClipUrl ? (
@@ -332,7 +411,7 @@ export const FinalVideo = ({ clips, apiBaseUrl, expectedClipCount, audioUrl }: F
                   <button
                     className="flex h-9 min-w-16 items-center gap-1.5 rounded-full bg-white px-3 text-neutral-950"
                     type="button"
-                    disabled={clips.length === 0 && !audioUrl}
+                    disabled={!canPlaySequence}
                     onClick={() => {
                       if (isPlayingSequence) {
                         stopSequence();
@@ -370,9 +449,9 @@ export const FinalVideo = ({ clips, apiBaseUrl, expectedClipCount, audioUrl }: F
             </div>
 
             <div className="flex gap-2">
-              <Button className="flex-1" disabled={clips.length === 0 && !audioUrl} onClick={playSequence}>
+              <Button className="flex-1" disabled={!canPlaySequence} onClick={playSequence}>
                 <Play className="mr-2 size-4" />
-                Play final
+                {isPreloadingClips ? `Loading ${loadedClipCount}/${clips.length}` : "Play final"}
               </Button>
               <Button variant="outline" disabled={!isPlayingSequence} onClick={stopSequence}>
                 <Square className="mr-2 size-4" />
