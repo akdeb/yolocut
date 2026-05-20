@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import { Playfair_Display } from "next/font/google";
 import { Navbar } from "./Navbar";
+import { Providers } from "./Providers";
 import "./globals.css";
 
 const playfair = Playfair_Display({
@@ -29,8 +30,10 @@ const RootLayout = async ({
       <body
         className={`${playfair.variable} m-0 grid h-screen grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[#f7f6f2] font-sans text-neutral-950`}
       >
-        <Navbar isAuthenticated={isAuthenticated} />
-        <div className="min-h-0">{children}</div>
+        <Providers>
+          <Navbar isAuthenticated={isAuthenticated} />
+          <div className="min-h-0">{children}</div>
+        </Providers>
       </body>
     </html>
   );

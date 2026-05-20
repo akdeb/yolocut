@@ -1,4 +1,4 @@
-import { Studio } from "./Studio";
+import { StudioEditorClient } from "./StudioEditorClient";
 
 type StudioPageProps = {
   params: Promise<{ query_id: string }>;
@@ -7,7 +7,7 @@ type StudioPageProps = {
 const StudioPage = async ({ params }: StudioPageProps) => {
   const { query_id } = await params;
 
-  return <Studio queryId={query_id} />;
+  return <StudioEditorClient queryId={query_id} />;
 };
 
 export default StudioPage;

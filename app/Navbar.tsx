@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { History } from "lucide-react";
 
 type NavbarProps = {
@@ -10,6 +10,12 @@ type NavbarProps = {
 
 export const Navbar = ({ isAuthenticated }: NavbarProps) => {
   const router = useRouter();
+  const pathname = usePathname();
+  const isStudioRoute = pathname.startsWith("/studio/");
+
+  if (isStudioRoute) {
+    return null;
+  }
 
   const handleLogout = async () => {
     await fetch("/api/logout", { method: "POST" });
@@ -17,7 +23,7 @@ export const Navbar = ({ isAuthenticated }: NavbarProps) => {
   };
 
   return (
-    <nav className="flex h-14 shrink-0 items-center justify-between px-5 font-playfair text-sm font-semibold text-neutral-500">
+    <nav className="relative flex h-14 shrink-0 items-center justify-between px-5 font-playfair text-sm font-semibold text-neutral-500">
       <button
         className="underline-offset-4 hover:text-neutral-950 hover:underline"
         type="button"
@@ -27,7 +33,7 @@ export const Navbar = ({ isAuthenticated }: NavbarProps) => {
       </button>
       <div className="flex items-center gap-5">
         <button
-          className="enabled:hover:text-neutral-950 disabled:cursor-not-allowed disabled:opacity-40"
+          className="enabled:hover:text-neutral-950 disabled:cursor-not-allowed disabled:opacity-40 mt-0.5"
           type="button"
           disabled={!isAuthenticated}
           onClick={() => router.push("/history")}

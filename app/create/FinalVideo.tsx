@@ -10,6 +10,8 @@ type FinalVideoProps = {
   apiBaseUrl: string;
   expectedClipCount: number;
   audioUrl: string;
+  showDetails?: boolean;
+  showHeader?: boolean;
 };
 
 const getClipDuration = (clip: SearchClipResult) => {
@@ -29,7 +31,14 @@ type MemoryClip = {
   url: string;
 };
 
-export const FinalVideo = ({ clips, apiBaseUrl, expectedClipCount, audioUrl }: FinalVideoProps) => {
+export const FinalVideo = ({
+  clips,
+  apiBaseUrl,
+  expectedClipCount,
+  audioUrl,
+  showDetails = true,
+  showHeader = true,
+}: FinalVideoProps) => {
   const primaryVideoRef = useRef<HTMLVideoElement>(null);
   const secondaryVideoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -275,25 +284,27 @@ export const FinalVideo = ({ clips, apiBaseUrl, expectedClipCount, audioUrl }: F
   }, [audioUrl]);
 
   return (
-    <div className="grid gap-5">
-      <div>
-        <div>
+    <div className="grid justify-items-center gap-5">
+      <div className="grid justify-items-center">
+        {showHeader ? (
+        <div className="w-full">
           <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.22em] text-emerald-500">
             <Scissors className="size-4" />
             <span>Final video</span>
           </div>
         </div>
+        ) : null}
 
-          <div className="relative w-full max-w-[310px] rounded-[2.35rem] border-[10px] border-neutral-950 bg-neutral-950 p-1 shadow-2xl">
+          <div className={showDetails ? "relative w-full max-w-[310px] rounded-[2.35rem] border-[10px] border-neutral-950 bg-neutral-950 p-1 shadow-2xl" : "relative w-[300px] max-w-full rounded-[2.55rem] border-[11px] border-neutral-950 bg-neutral-950 p-1.5 shadow-2xl"}>
             <div className="absolute left-1/2 top-2 z-10 h-5 w-24 -translate-x-1/2 rounded-full bg-neutral-950" />
-            <div className="relative aspect-[9/16] overflow-hidden rounded-[1.55rem] bg-neutral-950">
+            <div className={showDetails ? "relative aspect-[9/16] overflow-hidden rounded-[1.55rem] bg-neutral-950" : "relative aspect-[9/16] overflow-hidden rounded-[2rem] bg-neutral-950"}>
               {currentClip && currentClipUrl ? (
                 <video
                   ref={primaryVideoRef}
                   className={
                     activeSlot === 0
-                      ? "absolute inset-0 size-full object-cover opacity-100"
-                      : "absolute inset-0 size-full object-cover opacity-0"
+                      ? "absolute inset-0 size-full bg-neutral-950 object-cover opacity-100"
+                      : "absolute inset-0 size-full bg-neutral-950 object-cover opacity-0"
                   }
                   preload="auto"
                   muted
@@ -346,8 +357,8 @@ export const FinalVideo = ({ clips, apiBaseUrl, expectedClipCount, audioUrl }: F
                   ref={secondaryVideoRef}
                   className={
                     activeSlot === 1
-                      ? "absolute inset-0 size-full object-cover opacity-100"
-                      : "absolute inset-0 size-full object-cover opacity-0"
+                      ? "absolute inset-0 size-full bg-neutral-950 object-cover opacity-100"
+                      : "absolute inset-0 size-full bg-neutral-950 object-cover opacity-0"
                   }
                   preload="auto"
                   muted
@@ -436,6 +447,7 @@ export const FinalVideo = ({ clips, apiBaseUrl, expectedClipCount, audioUrl }: F
             </div>
           </div>
 
+          {showDetails ? (
           <div className="grid gap-3 p-4">
             <div className="flex items-center justify-between gap-3">
               <span className="flex items-center gap-2 text-sm font-semibold text-neutral-700">
@@ -472,8 +484,9 @@ export const FinalVideo = ({ clips, apiBaseUrl, expectedClipCount, audioUrl }: F
               </p>
             ) : null}
           </div>
+          ) : null}
 
-        {clips.length > 0 ? (
+        {showDetails && clips.length > 0 ? (
           <div className="grid gap-2">
             {clips.map((clip, index) => (
               <button

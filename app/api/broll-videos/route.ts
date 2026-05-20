@@ -20,6 +20,7 @@ type BrollRow = {
   blob_url: string | null;
   customer_id: string;
   indexed: boolean | null;
+  featured: boolean | null;
 };
 
 const getBlobPathname = (blobUrl: string) => {
@@ -28,6 +29,47 @@ const getBlobPathname = (blobUrl: string) => {
   } catch {
     return blobUrl.replace(/^\/+/, "");
   }
+};
+
+const supabaseHeaders = {
+  apikey: SUPABASE_PUBLISHABLE_KEY,
+  Authorization: `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
+};
+
+const parseContentRangeCount = (contentRange: string | null) => {
+  if (!contentRange) {
+    return 0;
+  }
+
+  const total = contentRange.split("/")[1];
+
+  if (!total || total === "*") {
+    return 0;
+  }
+
+  return Number.parseInt(total, 10) || 0;
+};
+
+const fetchBrollCount = async (userId: string, filters: Record<string, string> = {}) => {
+  const query = new URLSearchParams({
+    customer_id: `eq.${userId}`,
+    select: "broll_id",
+    ...filters,
+  });
+
+  const response = await fetch(`${SUPABASE_URL}/rest/v1/brolls?${query.toString()}`, {
+    headers: {
+      ...supabaseHeaders,
+      Prefer: "count=exact",
+    },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(errorText || "Failed to count b-roll rows");
+  }
+
+  return parseContentRangeCount(response.headers.get("content-range"));
 };
 
 export const GET = async () => {
@@ -40,16 +82,18 @@ export const GET = async () => {
 
   const query = new URLSearchParams({
     customer_id: `eq.${userId}`,
+    featured: "eq.true",
     order: "created_at.desc",
-    select: "broll_id,created_at,title,creator,size,blob_url,customer_id,indexed",
+    select: "broll_id,created_at,title,creator,size,blob_url,customer_id,indexed,featured",
   });
 
-  const response = await fetch(`${SUPABASE_URL}/rest/v1/brolls?${query.toString()}`, {
-    headers: {
-      apikey: SUPABASE_PUBLISHABLE_KEY,
-      Authorization: `Bearer ${SUPABASE_PUBLISHABLE_KEY}`,
-    },
-  });
+  const [totalCount, indexedCount, response] = await Promise.all([
+    fetchBrollCount(userId),
+    fetchBrollCount(userId, { indexed: "eq.true" }),
+    fetch(`${SUPABASE_URL}/rest/v1/brolls?${query.toString()}`, {
+      headers: supabaseHeaders,
+    }),
+  ]);
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -83,16 +127,19 @@ export const GET = async () => {
       };
     });
 
-  const indexedCount = videos.filter((video) => video.indexed).length;
+  const featuredIndexedCount = videos.filter((video) => video.indexed).length;
 
   return NextResponse.json({
     bucket: "yolocut-broll",
     user_id: userId,
     upload_prefix: `${userId}/`,
-    count: videos.length,
+    count: totalCount,
+    total_count: totalCount,
     indexed_count: indexedCount,
-    unindexed_count: videos.length - indexedCount,
-    fully_indexed: videos.length > 0 && indexedCount === videos.length,
+    featured_count: videos.length,
+    unindexed_count: Math.max(totalCount - indexedCount, 0),
+    fully_indexed: totalCount > 0 && indexedCount === totalCount,
     videos,
+    featured_indexed_count: featuredIndexedCount,
   });
 };

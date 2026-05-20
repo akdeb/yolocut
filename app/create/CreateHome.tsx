@@ -5,6 +5,7 @@
 import { DatabaseBackup, Loader2, RefreshCw, Upload } from "lucide-react";
 import Image from "next/image";
 import { useRef } from "react";
+import { Badge } from "../../src/components/ui/badge";
 import { Button } from "../../src/components/ui/button";
 import { CreatorSelect } from "./CreatorSelect";
 import { PromptBar } from "./PromptBar";
@@ -21,6 +22,8 @@ type BrollClip = {
 type CreateHomeProps = {
   brief: string;
   clips: BrollClip[];
+  totalBrollCount: number;
+  indexedBrollCount: number;
   canCreate: boolean;
   canIndex: boolean;
   isCreating: boolean;
@@ -54,6 +57,8 @@ const getClipAssetUrl = (url: string, apiBaseUrl: string) => {
 export const CreateHome = ({
   brief,
   clips,
+  totalBrollCount,
+  indexedBrollCount,
   canCreate,
   canIndex,
   isCreating,
@@ -72,12 +77,11 @@ export const CreateHome = ({
   onRefreshVideos,
 }: CreateHomeProps) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const indexedClipCount = clips.filter((clip) => clip.indexed).length;
   const shouldAnimateAssets = clips.length >= 8;
   const carouselClips = shouldAnimateAssets ? [...clips, ...clips] : clips;
 
   return (
-    <main className="grid h-full grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[#f7f6f2] px-5 pb-6 text-neutral-950 sm:pb-8">
+    <main className="grid h-full grid-rows-[auto_minmax(0,1fr)] overflow-hidden bg-[#f7f6f2] pb-6 text-neutral-950 sm:pb-8">
       <section className="grid justify-items-center gap-3">
         <div className="grid w-full max-w-4xl justify-items-center gap-3">
           <Image
@@ -119,8 +123,8 @@ export const CreateHome = ({
           <div className="mb-3 flex items-center justify-between gap-4">
               <div>
                 <p className="m-0 font-playfair text-sm text-neutral-500">
-                  {clips.length} clip{clips.length === 1 ? "" : "s"} in yolocut-broll
-                  {clips.length > 0 ? ` · ${indexedClipCount} indexed` : ""}
+                  {totalBrollCount} clip{totalBrollCount === 1 ? "" : "s"} in yolocut
+                  {totalBrollCount > 0 ? ` · ${indexedBrollCount} indexed` : ""}
                 </p>
               </div>
               <div className="flex flex-wrap items-center justify-end gap-2">
@@ -224,9 +228,12 @@ export const CreateHome = ({
                           {clip.name}
                         </strong>
                         {clip.creator ? (
-                          <span className="w-fit overflow-hidden text-ellipsis whitespace-nowrap rounded-full bg-neutral-100 px-2 py-0.5 text-[11px] font-bold text-neutral-600">
+                          <Badge
+                            variant="secondary"
+                            className="overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-normal"
+                          >
                             {clip.creator}
-                          </span>
+                          </Badge>
                         ) : null}
                       </div>
                     </div>

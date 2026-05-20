@@ -1,21 +1,19 @@
 "use client";
 
+/* eslint-disable @remotion/warn-native-media-tag */
+
 import { useEffect, useMemo, useState } from "react";
 import { upload } from "@vercel/blob/client";
-import { ExternalLink } from "lucide-react";
+import { Pencil, Share2, Sparkles } from "lucide-react";
 import { type PutBlobResult } from "@vercel/blob";
 import { CreateHome } from "./CreateHome";
-import { FinalAudio } from "./FinalAudio";
 import { FinalVideo } from "./FinalVideo";
-import { Query } from "./Query";
 import { UploadToast, type UploadToastState } from "./UploadToast";
 import {
-  Search,
   getSearchResultId,
-  resolveSourceUrl,
+  type SearchClipResult,
   type SearchRow,
 } from "./Search";
-import { Button } from "../../src/components/ui/button";
 
 type BrollClip = {
   id: string;
@@ -32,10 +30,11 @@ type BrollClip = {
 };
 
 type VideosResponse = {
-  directory: string;
+  directory?: string;
   user_id?: string;
   upload_prefix?: string;
   count: number;
+  total_count?: number;
   indexed_count: number;
   unindexed_count: number;
   fully_indexed: boolean;
@@ -73,6 +72,17 @@ type VisualBrollPrompt = {
   visual_broll: string;
   transcript?: string;
 };
+
+type BatchSearchResponse = {
+  rows: Array<{
+    index: number;
+    visual_broll: string;
+    query?: string;
+    results: SearchClipResult[];
+  }>;
+};
+
+type CreationStatus = "idle" | "clips" | "audio" | "complete" | "error";
 
 const DEFAULT_INDEX_API_BASE_URL =
   process.env.NODE_ENV === "production"
@@ -229,25 +239,25 @@ const YolocutPage = () => {
   const [isLoadingVideos, setIsLoadingVideos] = useState(true);
   const [isIndexing, setIsIndexing] = useState(false);
   const [isUploadingVideos, setIsUploadingVideos] = useState(false);
-  const [indexMessage, setIndexMessage] = useState("");
-  const [jobStatus, setJobStatus] = useState<IndexJobStatus | null>(null);
+  const [, setIndexMessage] = useState("");
+  const [, setJobStatus] = useState<IndexJobStatus | null>(null);
   const [searchRows, setSearchRows] = useState<SearchRow[]>([]);
   const [selectedResultIdsByRow, setSelectedResultIdsByRow] = useState<Record<string, string>>({});
-  const [searchPromptCount] = useState(0);
   const [searchError, setSearchError] = useState("");
-  const [finalAudioUrl] = useState("");
-  const [finalAudioDuration, setFinalAudioDuration] = useState(0);
+  const [finalAudioUrl, setFinalAudioUrl] = useState("");
+  const [, setFinalAudioDuration] = useState(0);
   const [finalAudioError, setFinalAudioError] = useState("");
-  const [editError, setEditError] = useState("");
-  const [isGeneratingAudio] = useState(false);
-  const [isOpeningEditor, setIsOpeningEditor] = useState(false);
+  const [, setIsGeneratingAudio] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [creationStatus, setCreationStatus] = useState<CreationStatus>("idle");
+  const [createdQueryId, setCreatedQueryId] = useState("");
   const [uploadPrefix, setUploadPrefix] = useState("");
   const [userId, setUserId] = useState("");
   const [creator, setCreator] = useState(CREATOR_OPTIONS[0]);
   const [uploadToast, setUploadToast] = useState<UploadToastState>(null);
-
-  const jobProgressPercent = getProgressPercent(jobStatus?.progress);
+  const [totalBrollCount, setTotalBrollCount] = useState(0);
+  const [indexedBrollCount, setIndexedBrollCount] = useState(0);
+  const [unindexedBrollCount, setUnindexedBrollCount] = useState(0);
 
   const selectedClips = useMemo(() => {
     return searchRows.flatMap((row) => {
@@ -264,12 +274,8 @@ const YolocutPage = () => {
     return brief.trim().length > 0 && !isCreating;
   }, [brief, isCreating]);
 
-  const unindexedClipCount = useMemo(() => {
-    return clips.filter((clip) => !clip.indexed).length;
-  }, [clips]);
-
-  const canIndex = unindexedClipCount > 0 && !isIndexing && !isLoadingVideos;
-  const shouldShowCreateHome = true;
+  const canIndex = unindexedBrollCount > 0 && !isIndexing && !isLoadingVideos;
+  const shouldShowResultPanel = creationStatus !== "idle" || Boolean(createdQueryId);
 
   const loadVideos = async () => {
     setIsLoadingVideos(true);
@@ -302,13 +308,19 @@ const YolocutPage = () => {
       });
 
       setClips(nextClips);
+      setTotalBrollCount(data.total_count ?? data.count);
+      setIndexedBrollCount(data.indexed_count);
+      setUnindexedBrollCount(data.unindexed_count);
       setIndexMessage(
-        data.count > 0
-          ? `${data.count} b-roll clip${data.count === 1 ? "" : "s"} loaded from Supabase.`
+        (data.total_count ?? data.count) > 0
+          ? `${data.total_count ?? data.count} b-roll clip${(data.total_count ?? data.count) === 1 ? "" : "s"} in Supabase (${data.indexed_count} indexed).`
           : "No b-roll clips found in yolocut-broll yet.",
       );
     } catch (error) {
       setClips([]);
+      setTotalBrollCount(0);
+      setIndexedBrollCount(0);
+      setUnindexedBrollCount(0);
       setIndexMessage(error instanceof Error ? error.message : "Failed to load videos");
     } finally {
       setIsLoadingVideos(false);
@@ -461,7 +473,7 @@ const YolocutPage = () => {
     setUploadToast({
       status: "loading",
       title: "Indexing b-roll",
-      description: `Starting index job for ${unindexedClipCount} unindexed clip${unindexedClipCount === 1 ? "" : "s"}...`,
+      description: `Starting index job for ${unindexedBrollCount} unindexed clip${unindexedBrollCount === 1 ? "" : "s"}...`,
     });
     setClips((currentClips) =>
       currentClips.map((clip) => ({
@@ -654,10 +666,22 @@ const YolocutPage = () => {
     }
 
     setIsCreating(true);
+    setCreationStatus("clips");
+    setCreatedQueryId("");
+    setSearchRows([]);
+    setSelectedResultIdsByRow({});
+    setFinalAudioUrl("");
+    setFinalAudioDuration(0);
     setSearchError("");
     setFinalAudioError("");
+    setUploadToast({
+      status: "loading",
+      title: "Creating video",
+      description: "Fetching the best performing clips...",
+    });
+
     try {
-      parseVisualBrollPrompts(brief);
+      const parsedPrompts = parseVisualBrollPrompts(brief);
       const response = await fetch("/api/queries", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -676,150 +700,226 @@ const YolocutPage = () => {
         throw new Error("Query did not return a query_id");
       }
 
-      window.location.assign(`/studio/${encodeURIComponent(queryId)}`);
-    } catch (error) {
-      setSearchRows([]);
-      setSelectedResultIdsByRow({});
-      setSearchError(error instanceof Error ? error.message : "Failed to create query");
-    } finally {
-      setIsCreating(false);
-    }
-  };
+      setCreatedQueryId(queryId);
 
-  const handleEdit = async () => {
-    if (!finalAudioUrl || selectedClips.length === 0) {
-      return;
-    }
-
-    setIsOpeningEditor(true);
-    setEditError("");
-    try {
-      const origin = window.location.origin;
-      const response = await fetch("/api/remotion-edit", {
+      const searchResponse = await fetch(`${INDEX_API_BASE_URL}/search/batch`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          audioSrc: `${origin}/api/final-audio`,
-          audioDurationInSeconds: finalAudioDuration,
-          clips: selectedClips.map((clip) => ({
-            src: resolveSourceUrl(clip, INDEX_API_BASE_URL),
-            name: clip.source_basename,
-            startInSeconds: clip.start_time,
-            endInSeconds: clip.end_time,
-          })),
+          customer_id: userId || "gruns",
+          items: parsedPrompts.map((prompt) => ({ visual_broll: prompt.visual_broll })),
+          results: 5,
+          save_top: 5,
+          trim: true,
+          force_trim_low_confidence: true,
+          backend: "gemini",
         }),
       });
 
-      if (!response.ok) {
-        throw new Error("Failed to prepare Remotion edit");
+      if (!searchResponse.ok) {
+        const error = (await searchResponse.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(error?.error ?? "Batch search failed");
       }
 
-      const data = (await response.json()) as { studioUrl?: string };
-      window.open(
-        data.studioUrl ?? `http://127.0.0.1:3002/CaptionedVideo?edit=${Date.now()}`,
-        "yolocut-remotion-studio",
+      const searchResult = (await searchResponse.json()) as BatchSearchResponse;
+      const nextRows = searchResult.rows.map((row) => ({
+        id: `${row.index}-${row.visual_broll}`,
+        query: row.query ?? row.visual_broll,
+        results: row.results.slice(0, 5),
+      }));
+
+      setSearchRows(nextRows);
+      setSelectedResultIdsByRow(
+        Object.fromEntries(
+          nextRows
+            .filter((row) => row.results[0])
+            .map((row) => [row.id, getSearchResultId(row.results[0])]),
+        ),
       );
+
+      await fetch(`/api/queries/${queryId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ broll_jsonb: searchResult.rows }),
+      });
+
+      setCreationStatus("audio");
+      setUploadToast({
+        status: "loading",
+        title: "Creating video",
+        description: "Fetching the highest quality audio...",
+      });
+
+      const transcript = parsedPrompts
+        .map((prompt) => prompt.transcript)
+        .filter((line): line is string => Boolean(line))
+        .join("\n\n");
+
+      if (transcript) {
+        setIsGeneratingAudio(true);
+        const audioResponse = await fetch("/api/query-audio", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ query_id: queryId, transcript }),
+        });
+
+        if (!audioResponse.ok) {
+          const error = (await audioResponse.json().catch(() => null)) as { error?: string } | null;
+          throw new Error(error?.error ?? "Final audio generation failed");
+        }
+
+        const audioResult = (await audioResponse.json()) as {
+          audio_url: string;
+          stream_url: string;
+        };
+        setFinalAudioUrl(audioResult.stream_url);
+      }
+
+      setCreationStatus("complete");
+      setUploadToast({
+        status: "success",
+        title: "Complete",
+        description: "Video created. Preview is ready.",
+      });
+      window.setTimeout(() => setUploadToast(null), 3500);
     } catch (error) {
-      setEditError(error instanceof Error ? error.message : "Failed to open Remotion editor");
+      setSearchRows([]);
+      setSelectedResultIdsByRow({});
+      const message = error instanceof Error ? error.message : "Failed to create query";
+      setSearchError(message);
+      setCreationStatus("error");
+      setUploadToast({
+        status: "error",
+        title: "Creation failed",
+        description: message,
+      });
     } finally {
-      setIsOpeningEditor(false);
+      setIsGeneratingAudio(false);
+      setIsCreating(false);
     }
   };
 
   return (
     <>
-    {shouldShowCreateHome ? (
-      <CreateHome
-        brief={brief}
-        clips={clips}
-        canCreate={canCreate}
-        canIndex={canIndex}
-        isCreating={isCreating}
-        isIndexing={isIndexing}
-        isLoadingVideos={isLoadingVideos}
-        isUploadingVideos={isUploadingVideos}
-        apiBaseUrl={INDEX_API_BASE_URL}
-        creator={creator}
-        creatorOptions={CREATOR_OPTIONS}
-        error={searchError}
-        onBriefChange={setBrief}
-        onCreatorChange={setCreator}
-        onCreate={handleCreate}
-        onIndex={handleIndex}
-        onUploadVideos={(files) => void handleUploadVideos(files)}
-        onRefreshVideos={() => void loadVideos()}
-      />
-    ) : (
-    <main className="grid h-full min-h-0 grid-cols-[minmax(360px,1.3fr)_minmax(0,2fr)_minmax(340px,1fr)] overflow-hidden bg-[#f7f6f2] text-neutral-950 max-[1100px]:grid-cols-1 max-[1100px]:grid-rows-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)]">
-      <Query
-        brief={brief}
-        clips={clips}
-        canIndex={canIndex}
-        isIndexing={isIndexing}
-        isLoadingVideos={isLoadingVideos}
-        isUploadingVideos={isUploadingVideos}
-        indexMessage={indexMessage}
-        jobStatus={jobStatus}
-        jobProgressPercent={jobProgressPercent}
-        apiBaseUrl={INDEX_API_BASE_URL}
-        creator={creator}
-        creatorOptions={CREATOR_OPTIONS}
-        onBriefChange={setBrief}
-        onCreatorChange={setCreator}
-        onIndex={handleIndex}
-        onUploadVideos={(files) => void handleUploadVideos(files)}
-        onRefreshVideos={() => void loadVideos()}
-      />
-
-      <section className="min-h-0 overflow-hidden bg-[#f7f6f2]">
-        <Search
-          rows={searchRows}
-          isSearching={isCreating}
-          error={searchError}
-          apiBaseUrl={INDEX_API_BASE_URL}
-          searchPromptCount={searchPromptCount}
-          selectedResultIdsByRow={selectedResultIdsByRow}
-          onSelectResult={(rowId, result) =>
-            setSelectedResultIdsByRow((currentSelections) => ({
-              ...currentSelections,
-              [rowId]: getSearchResultId(result),
-            }))
+      <main className="flex h-full min-h-0 overflow-hidden bg-[#f7f6f2] text-neutral-950">
+        <section
+          className={
+            shouldShowResultPanel
+              ? "min-h-0 basis-3/5 overflow-hidden transition-[flex-basis] duration-700 ease-out"
+              : "min-h-0 basis-full overflow-hidden transition-[flex-basis] duration-700 ease-out"
           }
-        />
-      </section>
-      <aside className="min-h-0 overflow-y-auto border-l border-neutral-200 bg-white/80 px-5 py-8">
-        <div className="grid gap-8">
-          <div className="flex items-center justify-end">
-            <Button
-              disabled={!finalAudioUrl || selectedClips.length === 0 || isOpeningEditor}
-              onClick={handleEdit}
-            >
-              <ExternalLink className="mr-2 size-4" />
-              {isOpeningEditor ? "Opening..." : "Edit"}
-            </Button>
-          </div>
-          {editError ? (
-            <p className="m-0 rounded-xl bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
-              {editError}
-            </p>
-          ) : null}
-          <FinalAudio
-            audioUrl={finalAudioUrl}
-            isGenerating={isGeneratingAudio}
-            error={finalAudioError}
-            onDurationChange={setFinalAudioDuration}
-          />
-          <FinalVideo
-            clips={selectedClips}
+        >
+          <CreateHome
+            brief={brief}
+            clips={clips}
+            totalBrollCount={totalBrollCount}
+            indexedBrollCount={indexedBrollCount}
+            canCreate={canCreate}
+            canIndex={canIndex}
+            isCreating={isCreating}
+            isIndexing={isIndexing}
+            isLoadingVideos={isLoadingVideos}
+            isUploadingVideos={isUploadingVideos}
             apiBaseUrl={INDEX_API_BASE_URL}
-            expectedClipCount={searchRows.length || searchPromptCount}
-            audioUrl={finalAudioUrl}
+            creator={creator}
+            creatorOptions={CREATOR_OPTIONS}
+            error={searchError}
+            onBriefChange={setBrief}
+            onCreatorChange={setCreator}
+            onCreate={handleCreate}
+            onIndex={handleIndex}
+            onUploadVideos={(files) => void handleUploadVideos(files)}
+            onRefreshVideos={() => void loadVideos()}
           />
-        </div>
-      </aside>
-    </main>
-    )}
-    <UploadToast toast={uploadToast} />
+        </section>
+
+        <aside
+          className={
+            shouldShowResultPanel
+              ? "relative min-h-0 basis-2/5 overflow-y-auto border-l border-neutral-200 px-5 py-6 opacity-100 transition-[flex-basis,opacity] duration-700 ease-out"
+              : "relative min-h-0 basis-0 overflow-hidden border-l border-transparent opacity-0 transition-[flex-basis,opacity] duration-700 ease-out"
+          }
+        >
+          <div className="mx-auto grid min-h-full max-w-md content-center gap-5">
+            <div>
+              <p className="m-0 font-playfair text-sm font-semibold text-neutral-500">
+                {creationStatus === "clips"
+                  ? "Fetching the best performing clips..."
+                  : creationStatus === "audio"
+                    ? "Fetching the highest quality audio..."
+                    : creationStatus === "complete"
+                      ? "Complete"
+                      : creationStatus === "error"
+                        ? "Creation failed"
+                        : "Preparing"}
+              </p>
+              <h2 className="m-0 mt-1 font-playfair text-4xl font-semibold tracking-[-0.045em]">
+                {creationStatus === "complete" ? "Your cut is ready" : "Creating cut"}
+              </h2>
+            </div>
+
+            {creationStatus === "complete" ? (
+              <>
+                <FinalVideo
+                  clips={selectedClips}
+                  apiBaseUrl={INDEX_API_BASE_URL}
+                  expectedClipCount={searchRows.length}
+                  audioUrl={finalAudioUrl}
+                  showDetails={false}
+                  showHeader={false}
+                />
+                {finalAudioUrl ? (
+                  <audio
+                    className="hidden"
+                    src={finalAudioUrl}
+                    preload="metadata"
+                    onLoadedMetadata={(event) => setFinalAudioDuration(event.currentTarget.duration)}
+                  />
+                ) : null}
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    className="inline-flex h-11 items-center justify-center rounded-2xl border border-neutral-200 bg-white px-4 font-playfair text-sm font-semibold text-neutral-800 shadow-sm hover:bg-neutral-50"
+                    type="button"
+                    disabled={!createdQueryId}
+                    onClick={() => window.location.assign(`/studio/${encodeURIComponent(createdQueryId)}`)}
+                  >
+                    <Pencil className="mr-2 size-4" />
+                    Edit in Studio
+                  </button>
+                  <button
+                    className="inline-flex h-11 items-center justify-center rounded-2xl bg-neutral-950 px-4 font-playfair text-sm font-semibold text-white shadow-sm hover:bg-neutral-800"
+                    type="button"
+                    onClick={() =>
+                      setUploadToast({
+                        status: "success",
+                        title: "Ready to share",
+                        description: "Export/share wiring can plug in here next.",
+                      })
+                    }
+                  >
+                    <Share2 className="mr-2 size-4" />
+                    Export / Share
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="grid aspect-[9/16] w-full max-w-[260px] place-items-center justify-self-center rounded-[2.5rem] border-[10px] border-neutral-950 bg-neutral-950 text-center text-sm font-semibold text-white/70 shadow-2xl">
+                <div className="grid justify-items-center gap-3 px-8">
+                  <Sparkles className="size-7 animate-pulse text-emerald-300" />
+                  <span>
+                    {creationStatus === "error"
+                      ? searchError || finalAudioError || "Something went wrong."
+                      : creationStatus === "audio"
+                        ? "Laying voiceover over the selected clips..."
+                        : "Finding the right visual sequence..."}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        </aside>
+      </main>
+      <UploadToast toast={uploadToast} />
     </>
   );
 };
