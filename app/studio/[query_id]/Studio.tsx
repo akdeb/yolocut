@@ -608,7 +608,7 @@ export const Studio = ({ queryId }: StudioProps) => {
           </div>
         </section>
 
-        <aside className="min-h-0 overflow-y-auto border-l border-neutral-200 px-5 py-6 pb-32">
+        <aside className="min-h-0 overflow-y-auto border-l border-neutral-200 px-5 pb-32">
           <div className="rounded-3xl border border-dashed border-neutral-200 bg-white/50 p-5 font-playfair text-sm font-semibold text-neutral-400">
             Controls coming later
           </div>

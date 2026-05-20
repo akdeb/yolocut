@@ -5,7 +5,7 @@ import Navbar from "./navbar";
 import useTimelineEvents from "./hooks/use-timeline-events";
 import Scene from "./scene";
 import { SceneRef } from "./scene/scene.types";
-import StateManager, { DESIGN_LOAD } from "@designcombo/state";
+import StateManager, { ADD_ITEMS } from "@designcombo/state";
 import { useEffect, useRef, useState } from "react";
 import {
   ResizableHandle,
@@ -113,7 +113,7 @@ const Editor = ({
     }
 
     const timeoutId = window.setTimeout(() => {
-      dispatch(DESIGN_LOAD, { payload: initialDesign });
+      dispatch(ADD_ITEMS, { payload: initialDesign });
     }, 0);
 
     return () => window.clearTimeout(timeoutId);

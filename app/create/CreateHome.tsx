@@ -118,7 +118,7 @@ export const CreateHome = ({
         </div>
       </section>
 
-      <section className="min-h-0 w-full pt-5 mt-4">
+      <section className="min-h-0 w-full pt-5 mt-4 px-5">
         <div className="mx-auto grid h-full w-full max-w-5xl grid-rows-[auto_minmax(0,1fr)]">
           <div className="mb-3 flex items-center justify-between gap-4">
               <div>
@@ -238,6 +238,10 @@ export const CreateHome = ({
                       </div>
                     </div>
                   ))}
+                </div>
+              ) : isLoadingVideos ?  (
+                <div className="font-playfair rounded-3xl border border-dashed border-neutral-200 bg-white/70 px-6 py-10 text-center text-sm font-medium text-neutral-500">
+                  Loading b-roll clips...
                 </div>
               ) : (
                 <div className="font-playfair rounded-3xl border border-dashed border-neutral-200 bg-white/70 px-6 py-10 text-center text-sm font-medium text-neutral-500">

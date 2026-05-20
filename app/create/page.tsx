@@ -2,12 +2,12 @@
 
 /* eslint-disable @remotion/warn-native-media-tag */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { upload } from "@vercel/blob/client";
 import { Pencil, Share2, Sparkles } from "lucide-react";
 import { type PutBlobResult } from "@vercel/blob";
 import { CreateHome } from "./CreateHome";
-import { FinalVideo } from "./FinalVideo";
+import { FinalVideo, type CaptionToken, type FinalVideoHandle } from "./FinalVideo";
 import { UploadToast, type UploadToastState } from "./UploadToast";
 import {
   getSearchResultId,
@@ -82,7 +82,14 @@ type BatchSearchResponse = {
   }>;
 };
 
-type CreationStatus = "idle" | "clips" | "audio" | "complete" | "error";
+type CreationStatus =
+  | "idle"
+  | "clips"
+  | "audio"
+  | "captions"
+  | "music"
+  | "complete"
+  | "error";
 
 const DEFAULT_INDEX_API_BASE_URL =
   process.env.NODE_ENV === "production"
@@ -245,7 +252,10 @@ const YolocutPage = () => {
   const [selectedResultIdsByRow, setSelectedResultIdsByRow] = useState<Record<string, string>>({});
   const [searchError, setSearchError] = useState("");
   const [finalAudioUrl, setFinalAudioUrl] = useState("");
+  const [finalMusicUrl, setFinalMusicUrl] = useState("");
+  const [finalCaptions, setFinalCaptions] = useState<CaptionToken[]>([]);
   const [, setFinalAudioDuration] = useState(0);
+  const finalVideoRef = useRef<FinalVideoHandle>(null);
   const [finalAudioError, setFinalAudioError] = useState("");
   const [, setIsGeneratingAudio] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
@@ -671,6 +681,8 @@ const YolocutPage = () => {
     setSearchRows([]);
     setSelectedResultIdsByRow({});
     setFinalAudioUrl("");
+    setFinalMusicUrl("");
+    setFinalCaptions([]);
     setFinalAudioDuration(0);
     setSearchError("");
     setFinalAudioError("");
@@ -773,6 +785,64 @@ const YolocutPage = () => {
           stream_url: string;
         };
         setFinalAudioUrl(audioResult.stream_url);
+
+        setCreationStatus("captions");
+        setUploadToast({
+          status: "loading",
+          title: "Creating video",
+          description: "Transcribing the voiceover and applying captions...",
+        });
+
+        const captionsResponse = await fetch("/api/query-captions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            query_id: queryId,
+            audio_url: audioResult.audio_url,
+          }),
+        });
+
+        if (!captionsResponse.ok) {
+          const error = (await captionsResponse.json().catch(() => null)) as
+            | { error?: string }
+            | null;
+          throw new Error(error?.error ?? "Caption generation failed");
+        }
+
+        const captionsResult = (await captionsResponse.json()) as {
+          captions: CaptionToken[];
+          captions_url: string;
+          duration_ms: number;
+        };
+        setFinalCaptions(captionsResult.captions);
+
+        setCreationStatus("music");
+        setUploadToast({
+          status: "loading",
+          title: "Creating video",
+          description: "Composing background music for the cut...",
+        });
+
+        try {
+          const musicResponse = await fetch("/api/query-music", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              query_id: queryId,
+              duration_ms: captionsResult.duration_ms,
+            }),
+          });
+
+          if (musicResponse.ok) {
+            const musicResult = (await musicResponse.json()) as {
+              music_url: string;
+              stream_url: string;
+            };
+            setFinalMusicUrl(musicResult.stream_url);
+          }
+        } catch {
+          // Background music is optional — keep the cut even if it fails.
+        }
       }
 
       setCreationStatus("complete");
@@ -840,18 +910,22 @@ const YolocutPage = () => {
               : "relative min-h-0 basis-0 overflow-hidden border-l border-transparent opacity-0 transition-[flex-basis,opacity] duration-700 ease-out"
           }
         >
-          <div className="mx-auto grid min-h-full max-w-md content-center gap-5">
-            <div>
+          <div className="mx-auto grid min-h-full content-center gap-5">
+            <div className="text-center">
               <p className="m-0 font-playfair text-sm font-semibold text-neutral-500">
                 {creationStatus === "clips"
                   ? "Fetching the best performing clips..."
                   : creationStatus === "audio"
                     ? "Fetching the highest quality audio..."
-                    : creationStatus === "complete"
-                      ? "Complete"
-                      : creationStatus === "error"
-                        ? "Creation failed"
-                        : "Preparing"}
+                    : creationStatus === "captions"
+                      ? "Transcribing and applying captions..."
+                      : creationStatus === "music"
+                        ? "Composing background music..."
+                        : creationStatus === "complete"
+                          ? "Complete"
+                          : creationStatus === "error"
+                            ? "Creation failed"
+                            : "Preparing"}
               </p>
               <h2 className="m-0 mt-1 font-playfair text-4xl font-semibold tracking-[-0.045em]">
                 {creationStatus === "complete" ? "Your cut is ready" : "Creating cut"}
@@ -861,10 +935,13 @@ const YolocutPage = () => {
             {creationStatus === "complete" ? (
               <>
                 <FinalVideo
+                  ref={finalVideoRef}
                   clips={selectedClips}
                   apiBaseUrl={INDEX_API_BASE_URL}
                   expectedClipCount={searchRows.length}
                   audioUrl={finalAudioUrl}
+                  musicUrl={finalMusicUrl}
+                  captions={finalCaptions}
                   showDetails={false}
                   showHeader={false}
                 />
@@ -876,9 +953,9 @@ const YolocutPage = () => {
                     onLoadedMetadata={(event) => setFinalAudioDuration(event.currentTarget.duration)}
                   />
                 ) : null}
-                <div className="grid grid-cols-2 gap-2">
+                <div className="flex flex-row gap-2 mx-auto">
                   <button
-                    className="inline-flex h-11 items-center justify-center rounded-2xl border border-neutral-200 bg-white px-4 font-playfair text-sm font-semibold text-neutral-800 shadow-sm hover:bg-neutral-50"
+                    className="inline-flex h-11 w-fit items-center justify-center rounded-2xl border border-neutral-200 bg-white px-4 font-playfair text-sm font-semibold text-neutral-800 shadow-sm hover:bg-neutral-50"
                     type="button"
                     disabled={!createdQueryId}
                     onClick={() => window.location.assign(`/studio/${encodeURIComponent(createdQueryId)}`)}
@@ -887,15 +964,34 @@ const YolocutPage = () => {
                     Edit in Studio
                   </button>
                   <button
-                    className="inline-flex h-11 items-center justify-center rounded-2xl bg-neutral-950 px-4 font-playfair text-sm font-semibold text-white shadow-sm hover:bg-neutral-800"
+                    className="inline-flex h-11 w-fit items-center justify-center rounded-2xl bg-neutral-950 px-4 font-playfair text-sm font-semibold text-white shadow-sm hover:bg-neutral-800"
                     type="button"
-                    onClick={() =>
+                    onClick={async () => {
                       setUploadToast({
-                        status: "success",
-                        title: "Ready to share",
-                        description: "Export/share wiring can plug in here next.",
-                      })
-                    }
+                        status: "loading",
+                        title: "Exporting video",
+                        description: "Recording the cut in real time...",
+                      });
+
+                      try {
+                        await finalVideoRef.current?.exportVideo();
+                        setUploadToast({
+                          status: "success",
+                          title: "Export complete",
+                          description: "Your video has been downloaded.",
+                        });
+                        window.setTimeout(() => setUploadToast(null), 4000);
+                      } catch (error) {
+                        setUploadToast({
+                          status: "error",
+                          title: "Export failed",
+                          description:
+                            error instanceof Error
+                              ? error.message
+                              : "Could not export the video.",
+                        });
+                      }
+                    }}
                   >
                     <Share2 className="mr-2 size-4" />
                     Export / Share
@@ -905,13 +1001,17 @@ const YolocutPage = () => {
             ) : (
               <div className="grid aspect-[9/16] w-full max-w-[260px] place-items-center justify-self-center rounded-[2.5rem] border-[10px] border-neutral-950 bg-neutral-950 text-center text-sm font-semibold text-white/70 shadow-2xl">
                 <div className="grid justify-items-center gap-3 px-8">
-                  <Sparkles className="size-7 animate-pulse text-emerald-300" />
-                  <span>
+                  <Sparkles className="size-7 animate-pulse text-emerald-300" strokeWidth={1} />
+                  <span className="font-playfair font-normal">
                     {creationStatus === "error"
                       ? searchError || finalAudioError || "Something went wrong."
                       : creationStatus === "audio"
                         ? "Laying voiceover over the selected clips..."
-                        : "Finding the right visual sequence..."}
+                        : creationStatus === "captions"
+                          ? "Transcribing the voiceover and styling subtitles..."
+                          : creationStatus === "music"
+                            ? "Composing upbeat background music..."
+                            : "Finding the right visual sequence..."}
                   </span>
                 </div>
               </div>

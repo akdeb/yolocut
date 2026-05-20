@@ -2,6 +2,14 @@
 @import "tw-animate-css";
 @custom-variant dark (&:is(.dark *));
 
+@font-face {
+  font-family: "TheBoldFont";
+  src: url("/theboldfont.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 @theme inline {
   --font-playfair: var(--font-playfair), Georgia, serif;
   --font-sans: var(--font-playfair), Georgia, serif;
@@ -220,6 +228,17 @@
   }
   to {
     transform: translateX(-50%);
+  }
+}
+
+@keyframes caption-pop {
+  from {
+    opacity: 0.35;
+    transform: scale(0.82) translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
   }
 }
 
