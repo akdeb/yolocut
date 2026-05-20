@@ -59,6 +59,8 @@ const EXPORT_WIDTH = 1080;
 const EXPORT_HEIGHT = 1920;
 const EXPORT_FPS = 30;
 const EXPORT_MIME_CANDIDATES = [
+  "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+  "video/mp4",
   "video/webm;codecs=vp9,opus",
   "video/webm;codecs=vp8,opus",
   "video/webm",
@@ -721,11 +723,13 @@ export const FinalVideo = forwardRef<FinalVideoHandle, FinalVideoProps>(function
       await recorderStopped;
       stopSequence();
 
-      const blob = new Blob(chunks, { type: mimeType || "video/webm" });
+      const blobType = mimeType || "video/webm";
+      const extension = blobType.includes("mp4") ? "mp4" : "webm";
+      const blob = new Blob(chunks, { type: blobType });
       const downloadUrl = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = downloadUrl;
-      anchor.download = "yolocut-cut.webm";
+      anchor.download = `yolocut-cut.${extension}`;
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();

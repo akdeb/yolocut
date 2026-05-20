@@ -22,6 +22,20 @@ type ClipTrimRequest = {
   end?: number;
 };
 
+const getAuthorizationHeader = (token: string) => {
+  const normalizedToken = token.trim();
+  return normalizedToken.toLowerCase().startsWith("bearer ")
+    ? normalizedToken
+    : `Bearer ${normalizedToken}`;
+};
+
+const encodeBlobPathname = (pathname: string) => {
+  return pathname
+    .split("/")
+    .map((part) => encodeURIComponent(decodeURIComponent(part)))
+    .join("/");
+};
+
 export const POST = async (request: Request) => {
   const blobToken = process.env.BLOB_READ_WRITE_TOKEN;
   const cookieStore = await cookies();
@@ -56,7 +70,7 @@ export const POST = async (request: Request) => {
   const outputPath = path.join(tempDirectory, "clip.mp4");
 
   try {
-    const sourceUrl = `${BLOB_BASE_URL}/${pathname}`;
+    const sourceUrl = `${BLOB_BASE_URL}/${encodeBlobPathname(pathname)}`;
 
     // -ss before -i seeks via HTTP range requests, so ffmpeg reads only the
     // moov atom plus the requested segment instead of the whole source file.
@@ -75,7 +89,7 @@ export const POST = async (request: Request) => {
         "-reconnect_delay_max",
         "5",
         "-headers",
-        `Authorization: Bearer ${blobToken}\r\n`,
+        `Authorization: ${getAuthorizationHeader(blobToken)}\r\n`,
         "-ss",
         String(start),
         "-i",

@@ -87,6 +87,7 @@ type CreationStatus =
   | "clips"
   | "audio"
   | "captions"
+  | "segments"
   | "music"
   | "complete"
   | "error";
@@ -101,6 +102,7 @@ const MAX_BRIEF_ITEMS = 50;
 const MAX_VISUAL_BROLL_LENGTH = 1000;
 const MAX_TRANSCRIPT_LENGTH = 2000;
 const INDEX_POLL_INTERVAL_MS = 1000;
+const MIN_TIMED_SEGMENT_SECONDS = 0.6;
 const CREATOR_OPTIONS = [
   "alexis anne",
   "alexis reneel",
@@ -142,6 +144,10 @@ const sanitizeFilename = (filename: string) => {
 
 const getSizeInMegabytes = (bytes: number) => {
   return Math.max(1, Math.round(bytes / 1024 / 1024));
+};
+
+const getClipDuration = (clip: SearchClipResult) => {
+  return Math.max(0, clip.end_time - clip.start_time);
 };
 
 const getJobState = (payload: Record<string, unknown>) => {
@@ -240,6 +246,167 @@ const parseVisualBrollPrompts = (value: string): VisualBrollPrompt[] => {
   return prompts;
 };
 
+type TimedPromptSegment = {
+  start: number;
+  end: number;
+};
+
+const normalizeWords = (value: string) => {
+  return value
+    .toLowerCase()
+    .replace(/['’]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+};
+
+const findWordSequence = (
+  captionWords: Array<{ word: string; caption: CaptionToken }>,
+  targetWords: string[],
+  cursor: number,
+) => {
+  if (targetWords.length === 0) {
+    return null;
+  }
+
+  for (let index = cursor; index <= captionWords.length - targetWords.length; index += 1) {
+    const matches = targetWords.every((word, offset) => captionWords[index + offset]?.word === word);
+
+    if (matches) {
+      return {
+        startIndex: index,
+        endIndex: index + targetWords.length - 1,
+      };
+    }
+  }
+
+  return null;
+};
+
+const getPromptSegmentsFromCaptions = (
+  prompts: VisualBrollPrompt[],
+  captions: CaptionToken[],
+  durationMs: number,
+): TimedPromptSegment[] => {
+  const lastCaptionEndSeconds = (captions.at(-1)?.endMs ?? 0) / 1000;
+  const totalDuration = Math.max(durationMs / 1000, lastCaptionEndSeconds);
+  const captionWords = captions
+    .map((caption) => ({
+      caption,
+      word: normalizeWords(caption.text)[0] ?? "",
+    }))
+    .filter((item) => item.word);
+  const transcriptWordsByPrompt = prompts.map((prompt) => normalizeWords(prompt.transcript ?? ""));
+  const matchedSegments: Array<TimedPromptSegment | null> = [];
+  let cursor = 0;
+
+  for (const words of transcriptWordsByPrompt) {
+    const match = findWordSequence(captionWords, words, cursor);
+
+    if (!match) {
+      matchedSegments.push(null);
+      continue;
+    }
+
+    matchedSegments.push({
+      start: captionWords[match.startIndex].caption.startMs / 1000,
+      end: captionWords[match.endIndex].caption.endMs / 1000,
+    });
+    cursor = match.endIndex + 1;
+  }
+
+  if (matchedSegments.every(Boolean)) {
+    return matchedSegments.map((segment, index) => {
+      const start = index === 0 ? 0 : matchedSegments[index - 1]?.end ?? segment?.start ?? 0;
+      const fallbackEnd = index === matchedSegments.length - 1 ? totalDuration : segment?.end ?? start;
+      const end = Math.max(start + MIN_TIMED_SEGMENT_SECONDS, fallbackEnd);
+
+      return { start, end };
+    });
+  }
+
+  const transcriptLengths = prompts.map((prompt) =>
+    Math.max(1, normalizeWords(prompt.transcript ?? prompt.visual_broll).length),
+  );
+  const totalTranscriptLength = transcriptLengths.reduce((sum, length) => sum + length, 0) || 1;
+  let cursorSeconds = 0;
+
+  return transcriptLengths.map((length, index) => {
+    const isLast = index === transcriptLengths.length - 1;
+    const segmentDuration = isLast
+      ? totalDuration - cursorSeconds
+      : totalDuration * (length / totalTranscriptLength);
+    const start = cursorSeconds;
+    const end = Math.max(start + MIN_TIMED_SEGMENT_SECONDS, start + segmentDuration);
+    cursorSeconds = end;
+
+    return { start, end };
+  });
+};
+
+const formatClipTime = (seconds: number) => {
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = Math.max(0, seconds - minutes * 60);
+
+  return `${minutes.toString().padStart(2, "0")}:${remainingSeconds
+    .toFixed(2)
+    .padStart(5, "0")}`;
+};
+
+const getBlobPathname = (value: string | null | undefined) => {
+  if (!value) {
+    return "";
+  }
+
+  if (value.startsWith("/api/broll-video")) {
+    return new URL(value, window.location.origin).searchParams.get("pathname") ?? "";
+  }
+
+  try {
+    const parsedUrl = new URL(value);
+
+    if (parsedUrl.hostname.endsWith(".blob.vercel-storage.com")) {
+      return parsedUrl.pathname.replace(/^\/+/, "");
+    }
+
+    if (parsedUrl.pathname === "/api/broll-video") {
+      return parsedUrl.searchParams.get("pathname") ?? "";
+    }
+  } catch {
+    return value.replace(/^\/+/, "");
+  }
+
+  return "";
+};
+
+const getSelectedResult = (row: SearchRow, selectedResultIdsByRow: Record<string, string>) => {
+  const selectedResultId = selectedResultIdsByRow[row.id];
+
+  return (
+    row.results.find((result) => getSearchResultId(result) === selectedResultId) ?? row.results[0]
+  );
+};
+
+const expandClipToSegmentDuration = (
+  clip: SearchClipResult,
+  segment: TimedPromptSegment,
+): SearchClipResult => {
+  const targetDuration = Math.max(MIN_TIMED_SEGMENT_SECONDS, segment.end - segment.start);
+  const sourceDuration = Math.max(0, clip.end_time - clip.start_time);
+  const sourceCenter = sourceDuration > 0 ? clip.start_time + sourceDuration / 2 : clip.start_time;
+  const start = Math.max(0, sourceCenter - targetDuration / 2);
+  const end = start + targetDuration;
+
+  return {
+    ...clip,
+    start_time: start,
+    end_time: end,
+    start_time_formatted: formatClipTime(start),
+    end_time_formatted: formatClipTime(end),
+  };
+};
+
 const YolocutPage = () => {
   const [brief, setBrief] = useState("");
   const [clips, setClips] = useState<BrollClip[]>([]);
@@ -253,6 +420,7 @@ const YolocutPage = () => {
   const [searchError, setSearchError] = useState("");
   const [finalAudioUrl, setFinalAudioUrl] = useState("");
   const [finalMusicUrl, setFinalMusicUrl] = useState("");
+  const [finalClips, setFinalClips] = useState<SearchClipResult[]>([]);
   const [finalCaptions, setFinalCaptions] = useState<CaptionToken[]>([]);
   const [, setFinalAudioDuration] = useState(0);
   const finalVideoRef = useRef<FinalVideoHandle>(null);
@@ -271,10 +439,7 @@ const YolocutPage = () => {
 
   const selectedClips = useMemo(() => {
     return searchRows.flatMap((row) => {
-      const selectedResultId = selectedResultIdsByRow[row.id];
-      const selectedResult =
-        row.results.find((result) => getSearchResultId(result) === selectedResultId) ??
-        row.results[0];
+      const selectedResult = getSelectedResult(row, selectedResultIdsByRow);
 
       return selectedResult ? [selectedResult] : [];
     });
@@ -360,6 +525,16 @@ const YolocutPage = () => {
       }
     };
   }, [finalAudioUrl]);
+
+  useEffect(() => {
+    return () => {
+      finalClips.forEach((clip) => {
+        if (clip.clip_url?.startsWith("blob:")) {
+          URL.revokeObjectURL(clip.clip_url);
+        }
+      });
+    };
+  }, [finalClips]);
 
   const applyJobStatus = (status: IndexJobStatus) => {
     const progressPercent = getProgressPercent(status.progress);
@@ -670,6 +845,71 @@ const YolocutPage = () => {
     }
   };
 
+  const prepareTrimmedFinalClips = async (
+    rows: SearchRow[],
+    selectedIds: Record<string, string>,
+    segments: TimedPromptSegment[],
+  ) => {
+    const trimmedClips: Array<SearchClipResult | null> = await Promise.all(
+      rows.map(async (row, index): Promise<SearchClipResult | null> => {
+        const selectedResult = getSelectedResult(row, selectedIds);
+
+        if (!selectedResult) {
+          return null;
+        }
+
+        const segment = segments[index] ?? {
+          start: 0,
+          end: getClipDuration(selectedResult),
+        };
+        const expandedClip = expandClipToSegmentDuration(selectedResult, segment);
+        const pathname =
+          getBlobPathname(expandedClip.source_file) ||
+          getBlobPathname(expandedClip.clip_stream_url) ||
+          getBlobPathname(expandedClip.clip_url);
+
+        if (!pathname) {
+          throw new Error(`Could not resolve blob path for ${expandedClip.source_basename}`);
+        }
+
+        const trimResponse = await fetch("/api/clip-trim", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            pathname,
+            start: expandedClip.start_time,
+            end: expandedClip.end_time,
+          }),
+        });
+
+        if (!trimResponse.ok) {
+          const error = (await trimResponse.json().catch(() => null)) as
+            | { error?: string }
+            | null;
+          throw new Error(error?.error ?? `Failed to trim ${expandedClip.source_basename}`);
+        }
+
+        const objectUrl = URL.createObjectURL(await trimResponse.blob());
+        const duration = Math.max(
+          MIN_TIMED_SEGMENT_SECONDS,
+          expandedClip.end_time - expandedClip.start_time,
+        );
+
+        return {
+          ...expandedClip,
+          clip_url: objectUrl,
+          clip_stream_url: objectUrl,
+          start_time: 0,
+          end_time: duration,
+          start_time_formatted: formatClipTime(0),
+          end_time_formatted: formatClipTime(duration),
+        };
+      }),
+    );
+
+    return trimmedClips.filter((clip): clip is SearchClipResult => clip !== null);
+  };
+
   const handleCreate = async () => {
     if (isCreating || brief.trim().length === 0) {
       return;
@@ -682,6 +922,7 @@ const YolocutPage = () => {
     setSelectedResultIdsByRow({});
     setFinalAudioUrl("");
     setFinalMusicUrl("");
+    setFinalClips([]);
     setFinalCaptions([]);
     setFinalAudioDuration(0);
     setSearchError("");
@@ -739,15 +980,14 @@ const YolocutPage = () => {
         query: row.query ?? row.visual_broll,
         results: row.results.slice(0, 5),
       }));
+      const nextSelectedResultIdsByRow = Object.fromEntries(
+        nextRows
+          .filter((row) => row.results[0])
+          .map((row) => [row.id, getSearchResultId(row.results[0])]),
+      );
 
       setSearchRows(nextRows);
-      setSelectedResultIdsByRow(
-        Object.fromEntries(
-          nextRows
-            .filter((row) => row.results[0])
-            .map((row) => [row.id, getSearchResultId(row.results[0])]),
-        ),
-      );
+      setSelectedResultIdsByRow(nextSelectedResultIdsByRow);
 
       await fetch(`/api/queries/${queryId}`, {
         method: "PATCH",
@@ -815,6 +1055,48 @@ const YolocutPage = () => {
           duration_ms: number;
         };
         setFinalCaptions(captionsResult.captions);
+
+        setCreationStatus("segments");
+        setUploadToast({
+          status: "loading",
+          title: "Creating video",
+          description: "Timing the captions to b-roll and preloading MP4 clips...",
+        });
+
+        const promptSegments = getPromptSegmentsFromCaptions(
+          parsedPrompts,
+          captionsResult.captions,
+          captionsResult.duration_ms,
+        );
+        const promptTimedSelectedClips = nextRows.map((row, index) => {
+          const selectedResult = getSelectedResult(row, nextSelectedResultIdsByRow);
+          const segment = promptSegments[index];
+
+          return selectedResult && segment
+            ? expandClipToSegmentDuration(selectedResult, segment)
+            : selectedResult ?? null;
+        });
+        const trimmedFinalClips = await prepareTrimmedFinalClips(
+          nextRows,
+          nextSelectedResultIdsByRow,
+          promptSegments,
+        );
+        setFinalClips(trimmedFinalClips);
+
+        await fetch(`/api/queries/${queryId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            broll_jsonb: nextRows.map((row, index) => ({
+              index,
+              visual_broll: row.query,
+              query: row.query,
+              results: row.results,
+              selected_result: promptTimedSelectedClips[index] ?? null,
+              prompt_time_range: promptSegments[index] ?? null,
+            })),
+          }),
+        });
 
         setCreationStatus("music");
         setUploadToast({
@@ -919,13 +1201,15 @@ const YolocutPage = () => {
                     ? "Fetching the highest quality audio..."
                     : creationStatus === "captions"
                       ? "Transcribing and applying captions..."
-                      : creationStatus === "music"
-                        ? "Composing background music..."
-                        : creationStatus === "complete"
-                          ? "Complete"
-                          : creationStatus === "error"
-                            ? "Creation failed"
-                            : "Preparing"}
+                      : creationStatus === "segments"
+                        ? "Preparing seamless MP4 segments..."
+                        : creationStatus === "music"
+                          ? "Composing background music..."
+                          : creationStatus === "complete"
+                            ? "Complete"
+                            : creationStatus === "error"
+                              ? "Creation failed"
+                              : "Preparing"}
               </p>
               <h2 className="m-0 mt-1 font-playfair text-4xl font-semibold tracking-[-0.045em]">
                 {creationStatus === "complete" ? "Your cut is ready" : "Creating cut"}
@@ -936,7 +1220,7 @@ const YolocutPage = () => {
               <>
                 <FinalVideo
                   ref={finalVideoRef}
-                  clips={selectedClips}
+                  clips={finalClips.length > 0 ? finalClips : selectedClips}
                   apiBaseUrl={INDEX_API_BASE_URL}
                   expectedClipCount={searchRows.length}
                   audioUrl={finalAudioUrl}
@@ -1009,9 +1293,11 @@ const YolocutPage = () => {
                         ? "Laying voiceover over the selected clips..."
                         : creationStatus === "captions"
                           ? "Transcribing the voiceover and styling subtitles..."
-                          : creationStatus === "music"
-                            ? "Composing upbeat background music..."
-                            : "Finding the right visual sequence..."}
+                          : creationStatus === "segments"
+                            ? "Preloading exact MP4 b-roll segments..."
+                            : creationStatus === "music"
+                              ? "Composing upbeat background music..."
+                              : "Finding the right visual sequence..."}
                   </span>
                 </div>
               </div>

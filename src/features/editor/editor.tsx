@@ -3,6 +3,7 @@ import Timeline from "./timeline";
 import useStore from "./store/use-store";
 import Navbar from "./navbar";
 import useTimelineEvents from "./hooks/use-timeline-events";
+import usePlayerEvents from "./hooks/use-player-events";
 import Scene from "./scene";
 import { SceneRef } from "./scene/scene.types";
 import StateManager, { ADD_ITEMS } from "@designcombo/state";
@@ -105,6 +106,7 @@ const Editor = ({
   const isLargeScreen = useIsLargeScreen();
 
   useTimelineEvents();
+  usePlayerEvents();
 
   const { setCompactFonts, setFonts } = useDataState();
   useEffect(() => {

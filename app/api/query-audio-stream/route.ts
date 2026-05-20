@@ -17,6 +17,13 @@ const PASSTHROUGH_HEADERS = [
   "last-modified",
 ];
 
+const getAuthorizationHeader = (token: string) => {
+  const normalizedToken = token.trim();
+  return normalizedToken.toLowerCase().startsWith("bearer ")
+    ? normalizedToken
+    : `Bearer ${normalizedToken}`;
+};
+
 export const GET = async (request: Request) => {
   const token = process.env.BLOB_READ_WRITE_TOKEN;
   const cookieStore = await cookies();
@@ -36,7 +43,7 @@ export const GET = async (request: Request) => {
     return NextResponse.json({ error: "Audio pathname is required" }, { status: 400 });
   }
 
-  const headers = new Headers({ Authorization: `Bearer ${token}` });
+  const headers = new Headers({ Authorization: getAuthorizationHeader(token) });
   const range = request.headers.get("range");
 
   if (range) {

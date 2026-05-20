@@ -34,6 +34,11 @@ type SearchRow = {
   visual_broll: string;
   query?: string;
   results: SearchClipResult[];
+  selected_result?: SearchClipResult | null;
+  prompt_time_range?: {
+    start?: number;
+    end?: number;
+  } | null;
 };
 
 type QueryRow = {
@@ -41,6 +46,7 @@ type QueryRow = {
   query_text: string;
   broll_jsonb: unknown;
   audio_url: string | null;
+  music_url: string | null;
   captions_url: string | null;
 };
 
@@ -56,6 +62,11 @@ type EditorPayload = {
   tracks: unknown[];
 };
 
+type StudioLoadState = {
+  message: string;
+  error?: string;
+};
+
 const DEFAULT_INDEX_API_BASE_URL =
   process.env.NODE_ENV === "production"
     ? "https://yolocut-server.vercel.app"
@@ -67,6 +78,10 @@ const CAPTION_FONT_FAMILY = "theboldfont";
 const CAPTION_FONT_URL = "https://cdn.designcombo.dev/fonts/the-bold-font.ttf";
 
 const resolveApiUrl = (url: string) => {
+  if (url.startsWith("blob:") || url.startsWith("data:")) {
+    return url;
+  }
+
   if (url.startsWith("http://") || url.startsWith("https://")) {
     try {
       const parsedUrl = new URL(url);
@@ -104,6 +119,139 @@ const resolveSourceUrl = (result: SearchClipResult) => {
   }
 
   return resolveApiUrl(`/clips?path=${encodeURIComponent(result.source_file)}`);
+};
+
+const getClipDuration = (clip: SearchClipResult) => {
+  return Math.max(0, clip.end_time - clip.start_time);
+};
+
+const formatClipTime = (seconds: number) => {
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = Math.max(0, seconds - minutes * 60);
+
+  return `${minutes.toString().padStart(2, "0")}:${remainingSeconds
+    .toFixed(2)
+    .padStart(5, "0")}`;
+};
+
+const getBlobPathname = (value: string | null | undefined) => {
+  if (!value) {
+    return "";
+  }
+
+  if (value.startsWith("/api/broll-video")) {
+    return new URL(value, window.location.origin).searchParams.get("pathname") ?? "";
+  }
+
+  try {
+    const parsedUrl = new URL(value);
+
+    if (parsedUrl.hostname.endsWith(".blob.vercel-storage.com")) {
+      return parsedUrl.pathname.replace(/^\/+/, "");
+    }
+
+    if (parsedUrl.pathname === "/api/broll-video") {
+      return parsedUrl.searchParams.get("pathname") ?? "";
+    }
+  } catch {
+    return value.replace(/^\/+/, "");
+  }
+
+  return "";
+};
+
+const expandClipToDuration = (clip: SearchClipResult, durationSeconds: number) => {
+  const targetDuration = Math.max(0.6, durationSeconds);
+  const sourceDuration = getClipDuration(clip);
+  const center = sourceDuration > 0 ? clip.start_time + sourceDuration / 2 : clip.start_time;
+  const start = Math.max(0, center - targetDuration / 2);
+  const end = start + targetDuration;
+
+  return {
+    ...clip,
+    start_time: start,
+    end_time: end,
+    start_time_formatted: formatClipTime(start),
+    end_time_formatted: formatClipTime(end),
+  };
+};
+
+const getClipForRow = (row: SearchRow) => {
+  const selected = row.selected_result;
+  const fallback = row.results?.[0];
+
+  if (!selected) {
+    return fallback ?? null;
+  }
+
+  const hasEphemeralPreview =
+    selected.clip_url?.startsWith("blob:") || selected.clip_stream_url?.startsWith("blob:");
+  const segmentDuration =
+    typeof row.prompt_time_range?.start === "number" && typeof row.prompt_time_range?.end === "number"
+      ? Math.max(0.6, row.prompt_time_range.end - row.prompt_time_range.start)
+      : getClipDuration(selected);
+
+  if (hasEphemeralPreview && fallback) {
+    return expandClipToDuration(fallback, segmentDuration);
+  }
+
+  return selected;
+};
+
+const trimClipToObjectUrl = async (clip: SearchClipResult) => {
+  const pathname =
+    getBlobPathname(clip.source_file) ||
+    getBlobPathname(clip.clip_stream_url) ||
+    getBlobPathname(clip.clip_url);
+
+  if (!pathname) {
+    return clip;
+  }
+
+  const response = await fetch("/api/clip-trim", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      pathname,
+      start: clip.start_time,
+      end: clip.end_time,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "");
+    throw new Error(errorText || `Failed to prepare ${clip.source_basename}`);
+  }
+
+  const objectUrl = URL.createObjectURL(await response.blob());
+  const duration = getClipDuration(clip);
+
+  return {
+    ...clip,
+    clip_url: objectUrl,
+    clip_stream_url: objectUrl,
+    start_time: 0,
+    end_time: duration,
+    start_time_formatted: formatClipTime(0),
+    end_time_formatted: formatClipTime(duration),
+  };
+};
+
+const preparePlayableClips = async (
+  clips: SearchClipResult[],
+  onProgress: (completed: number, total: number) => void,
+) => {
+  const playableClips: SearchClipResult[] = [];
+
+  // Keep this sequential on purpose. Several concurrent ffmpeg HTTP trims can
+  // starve each other and leave Remotion previewing the original private MOVs,
+  // which is what caused the black-frame playback in Studio.
+  for (const clip of clips) {
+    playableClips.push(await trimClipToObjectUrl(clip));
+    onProgress(playableClips.length, clips.length);
+  }
+
+  return playableClips;
 };
 
 // Both audio (.mp3) and captions (.captions.json) live under `${user}_audio/`,
@@ -158,7 +306,7 @@ const buildVideoItems = (clips: SearchClipResult[]) => {
     }
 
     const trimFromMs = Math.max(0, clip.start_time * 1000);
-    const trimToMs = Math.max(trimFromMs + 1000, clip.end_time * 1000);
+    const trimToMs = Math.max(trimFromMs + 600, clip.end_time * 1000);
     const clipDurationMs = trimToMs - trimFromMs;
 
     const item = {
@@ -227,14 +375,11 @@ const buildCaptionItems = (captions: CaptionToken[], audioSrc: string, parentId:
 
 const buildEditorPayload = (
   query: QueryRow,
+  clips: SearchClipResult[],
   captions: CaptionToken[],
   audioDurationMs: number,
+  musicDurationMs: number,
 ): EditorPayload => {
-  const rows = Array.isArray(query.broll_jsonb) ? (query.broll_jsonb as SearchRow[]) : [];
-  const clips = rows
-    .map((row) => row.results?.[0])
-    .filter((result): result is SearchClipResult => Boolean(result));
-
   const videoItems = buildVideoItems(clips);
   const visualDurationMs = videoItems.reduce(
     (total, item) => Math.max(total, item.display.to),
@@ -242,6 +387,7 @@ const buildEditorPayload = (
   );
 
   const audioSrc = resolveBlobProxyUrl(query.audio_url);
+  const musicSrc = resolveBlobProxyUrl(query.music_url);
   const audioId = generateId();
   const audioDuration = audioDurationMs > 0 ? audioDurationMs : visualDurationMs || 1000;
   const audioItem = audioSrc
@@ -254,8 +400,22 @@ const buildEditorPayload = (
         duration: audioDuration,
         playbackRate: 1,
         isMain: false,
-        metadata: { sourceUrl: audioSrc },
+        metadata: { sourceUrl: audioSrc, previewUrl: "Voiceover" },
         details: { src: audioSrc, volume: 100 },
+      }
+    : null;
+  const musicItem = musicSrc
+    ? {
+        id: generateId(),
+        type: "audio",
+        name: "Music",
+        display: { from: 0, to: musicDurationMs > 0 ? musicDurationMs : audioDuration },
+        trim: { from: 0, to: musicDurationMs > 0 ? musicDurationMs : audioDuration },
+        duration: musicDurationMs > 0 ? musicDurationMs : audioDuration,
+        playbackRate: 1,
+        isMain: false,
+        metadata: { sourceUrl: musicSrc, previewUrl: "Music" },
+        details: { src: musicSrc, volume: 10 },
       }
     : null;
 
@@ -290,22 +450,41 @@ const buildEditorPayload = (
     });
   }
 
+  if (musicItem) {
+    tracks.push({
+      id: generateId(),
+      type: "audio",
+      name: "Music",
+      items: [musicItem.id],
+    });
+  }
+
   return {
-    trackItems: [...videoItems, ...(audioItem ? [audioItem] : []), ...captionItems],
+    trackItems: [
+      ...videoItems,
+      ...(audioItem ? [audioItem] : []),
+      ...(musicItem ? [musicItem] : []),
+      ...captionItems,
+    ],
     tracks,
   };
 };
 
 export const StudioEditorClient = ({ queryId }: { queryId: string }) => {
   const [payload, setPayload] = useState<EditorPayload | undefined>();
+  const [loadState, setLoadState] = useState<StudioLoadState>({
+    message: "Preparing studio...",
+  });
 
   useEffect(() => {
     let cancelled = false;
 
     const loadStudio = async () => {
+      setLoadState({ message: "Loading saved cut..." });
       const response = await fetch(`/api/queries/${queryId}`);
 
       if (!response.ok) {
+        setLoadState({ message: "Studio failed to load.", error: "Could not load this query." });
         return;
       }
 
@@ -325,6 +504,20 @@ export const StudioEditorClient = ({ queryId }: { queryId: string }) => {
       }
 
       const audioDurationMs = await probeAudioDurationMs(resolveBlobProxyUrl(query.audio_url));
+      const musicDurationMs = await probeAudioDurationMs(resolveBlobProxyUrl(query.music_url));
+      const rows = Array.isArray(query.broll_jsonb) ? (query.broll_jsonb as SearchRow[]) : [];
+      const selectedClips = rows.map(getClipForRow).filter((clip): clip is SearchClipResult => Boolean(clip));
+      setLoadState({
+        message:
+          selectedClips.length > 0
+            ? `Preparing 0/${selectedClips.length} timeline clips...`
+            : "Preparing audio and captions...",
+      });
+      const playableClips = await preparePlayableClips(selectedClips, (completed, total) => {
+        if (!cancelled) {
+          setLoadState({ message: `Preparing ${completed}/${total} timeline clips...` });
+        }
+      });
 
       await loadFonts([{ name: CAPTION_FONT_FAMILY, url: CAPTION_FONT_URL }]).catch(
         () => undefined,
@@ -334,15 +527,40 @@ export const StudioEditorClient = ({ queryId }: { queryId: string }) => {
         return;
       }
 
-      setPayload(buildEditorPayload(query, captions, audioDurationMs));
+      setPayload(buildEditorPayload(query, playableClips, captions, audioDurationMs, musicDurationMs));
+      setLoadState({ message: "Studio ready." });
     };
 
-    void loadStudio();
+    void loadStudio().catch((error) => {
+      if (!cancelled) {
+        setLoadState({
+          message: "Studio failed to prepare playback.",
+          error: error instanceof Error ? error.message : "Unknown studio loading error",
+        });
+      }
+    });
 
     return () => {
       cancelled = true;
     };
   }, [queryId]);
+
+  if (!payload) {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-background">
+        <div className="rounded-2xl border border-border bg-card px-6 py-5 text-center shadow-sm">
+          <p className="font-playfair text-2xl font-bold text-foreground">{loadState.message}</p>
+          {loadState.error ? (
+            <p className="mt-2 max-w-md text-sm text-destructive">{loadState.error}</p>
+          ) : (
+            <p className="mt-2 max-w-md text-sm text-muted-foreground">
+              Building local MP4 slices so preview playback, captions, voiceover, and music start cleanly.
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   return <Editor id={queryId} initialDesign={payload} />;
 };

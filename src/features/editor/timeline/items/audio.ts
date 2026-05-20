@@ -30,6 +30,7 @@ class Audio extends Trimmable {
   static type = "Audio";
   public barData?: AudioData;
   public hasSrc = true;
+  public metadata?: Partial<IMetadata> & { previewUrl?: string };
   private offscreenCanvas: OffscreenCanvas | null = null;
   private offscreenCtx: OffscreenCanvasRenderingContext2D | null = null;
 
@@ -51,6 +52,7 @@ class Audio extends Trimmable {
     this.duration = props.duration;
     this.fill = "#2D1625";
     this.src = props.src;
+    this.metadata = props.metadata;
     this.objectCaching = false;
     this.initOffscreenCanvas();
     this.initialize();
@@ -157,7 +159,11 @@ class Audio extends Trimmable {
     ctx.fillStyle = "#ffffff";
     ctx.textAlign = "left";
     ctx.clip();
-    ctx.fillText("Audio", 36, 14);
+    const label =
+      typeof this.metadata?.previewUrl === "string" && this.metadata.previewUrl
+        ? this.metadata.previewUrl
+        : "Audio";
+    ctx.fillText(label, 36, 14);
     ctx.translate(8, 1);
     ctx.fillStyle = "#ffffff";
     ctx.fill(audioIconPath);

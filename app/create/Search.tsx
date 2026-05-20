@@ -34,6 +34,10 @@ type SearchProps = {
 };
 
 const resolveApiUrl = (url: string, apiBaseUrl: string) => {
+  if (url.startsWith("blob:") || url.startsWith("data:")) {
+    return url;
+  }
+
   if (url.startsWith("http://") || url.startsWith("https://")) {
     try {
       const parsedUrl = new URL(url);

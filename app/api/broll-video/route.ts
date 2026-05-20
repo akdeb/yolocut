@@ -18,6 +18,13 @@ const PASSTHROUGH_HEADERS = [
   "last-modified",
 ];
 
+const getAuthorizationHeader = (token: string) => {
+  const normalizedToken = token.trim();
+  return normalizedToken.toLowerCase().startsWith("bearer ")
+    ? normalizedToken
+    : `Bearer ${normalizedToken}`;
+};
+
 export const GET = async (request: Request) => {
   const token = process.env.BLOB_READ_WRITE_TOKEN;
   const cookieStore = await cookies();
@@ -41,7 +48,7 @@ export const GET = async (request: Request) => {
   }
 
   const upstreamHeaders = new Headers({
-    Authorization: `Bearer ${token}`,
+    Authorization: getAuthorizationHeader(token),
   });
   const range = request.headers.get("range");
 
