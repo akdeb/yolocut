@@ -1,13 +1,15 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { createWriteStream, existsSync } from "node:fs";
+import { chmod, mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { pipeline } from "node:stream/promises";
 import { promisify } from "node:util";
+import { createGunzip } from "node:zlib";
+import { Readable } from "node:stream";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-// ffmpeg-static ships a full-featured statically-linked ffmpeg with HTTPS support.
-// The Remotion compositor's ffmpeg is a stripped build without HTTP/HTTPS protocol support.
-import ffmpegPath from "ffmpeg-static";
+import ffmpegStaticPath from "ffmpeg-static";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,9 +21,45 @@ const BLOB_BASE_URL =
   process.env.BLOB_BASE_URL ?? "https://nl1diqavf0vxk1gf.private.blob.vercel-storage.com";
 const MAX_CLIP_SECONDS = 120;
 
-if (!ffmpegPath) {
-  throw new Error("ffmpeg-static binary not found for this platform");
-}
+// ffmpeg-static b6.1.1 — matches the installed package version.
+// Used as a fallback when the postinstall download script fails on the build server
+// (Vercel sometimes blocks outbound connections during npm install).
+const FFMPEG_RELEASE = "b6.1.1";
+const FFMPEG_TMP_PATH = `/tmp/ffmpeg-static-${FFMPEG_RELEASE}`;
+
+let ffmpegPathPromise: Promise<string> | null = null;
+
+const getFfmpegPath = (): Promise<string> => {
+  if (ffmpegPathPromise) return ffmpegPathPromise;
+
+  ffmpegPathPromise = (async () => {
+    // Best case: binary was deployed alongside the function (outputFileTracingIncludes).
+    if (ffmpegStaticPath && existsSync(ffmpegStaticPath)) {
+      return ffmpegStaticPath;
+    }
+
+    // Fallback: binary not deployed — download it once to /tmp per Lambda instance.
+    if (!existsSync(FFMPEG_TMP_PATH)) {
+      const platform = process.platform; // "linux" on Lambda
+      const arch = process.arch;        // "x64" on Lambda
+      const url = `https://github.com/eugeneware/ffmpeg-static/releases/download/${FFMPEG_RELEASE}/ffmpeg-${platform}-${arch}.gz`;
+      const res = await fetch(url);
+      if (!res.ok) {
+        throw new Error(`Failed to download ffmpeg binary (${res.status}): ${url}`);
+      }
+      await pipeline(
+        Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0]),
+        createGunzip(),
+        createWriteStream(FFMPEG_TMP_PATH),
+      );
+      await chmod(FFMPEG_TMP_PATH, 0o755);
+    }
+
+    return FFMPEG_TMP_PATH;
+  })();
+
+  return ffmpegPathPromise;
+};
 
 type ClipTrimRequest = {
   pathname?: string;
@@ -77,12 +115,15 @@ export const POST = async (request: Request) => {
   const outputPath = path.join(tempDirectory, "clip.mp4");
 
   try {
-    const sourceUrl = `${BLOB_BASE_URL}/${encodeBlobPathname(pathname)}`;
+    const [ffmpegBin, sourceUrl] = await Promise.all([
+      getFfmpegPath(),
+      Promise.resolve(`${BLOB_BASE_URL}/${encodeBlobPathname(pathname)}`),
+    ]);
 
     // -ss before -i seeks via HTTP range requests, so ffmpeg reads only the
     // moov atom plus the requested segment instead of the whole source file.
     await execFileAsync(
-      ffmpegPath!,
+      ffmpegBin,
       [
         "-hide_banner",
         "-loglevel",
