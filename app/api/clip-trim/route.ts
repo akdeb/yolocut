@@ -1,11 +1,13 @@
 import { execFile } from "node:child_process";
-import { accessSync, chmodSync, constants, statSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+// ffmpeg-static ships a full-featured statically-linked ffmpeg with HTTPS support.
+// The Remotion compositor's ffmpeg is a stripped build without HTTP/HTTPS protocol support.
+import ffmpegPath from "ffmpeg-static";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,52 +19,9 @@ const BLOB_BASE_URL =
   process.env.BLOB_BASE_URL ?? "https://nl1diqavf0vxk1gf.private.blob.vercel-storage.com";
 const MAX_CLIP_SECONDS = 120;
 
-// Mirrors Remotion's own get-executable-path + make-file-executable logic.
-// We resolve the path ourselves so we never go through npx/npm at runtime.
-const getFfmpegBin = (): { bin: string; cwd: string; env: NodeJS.ProcessEnv | undefined } => {
-  const p = process.platform;
-  const a = process.arch;
-
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const getDir = (): string => {
-    if (p === "darwin" && a === "arm64") return (require("@remotion/compositor-darwin-arm64") as { dir: string }).dir;
-    if (p === "darwin" && a === "x64") return (require("@remotion/compositor-darwin-x64") as { dir: string }).dir;
-    if (p === "linux" && a === "x64") {
-      try { return (require("@remotion/compositor-linux-x64-gnu") as { dir: string }).dir; } catch { /* musl fallback */ }
-      return (require("@remotion/compositor-linux-x64-musl") as { dir: string }).dir;
-    }
-    if (p === "linux" && a === "arm64") {
-      try { return (require("@remotion/compositor-linux-arm64-gnu") as { dir: string }).dir; } catch { /* musl fallback */ }
-      return (require("@remotion/compositor-linux-arm64-musl") as { dir: string }).dir;
-    }
-    if (p === "win32") return (require("@remotion/compositor-win32-x64-msvc") as { dir: string }).dir;
-    throw new Error(`Unsupported platform: ${p}/${a}`);
-  };
-
-  const dir = getDir();
-  const bin = path.join(dir, p === "win32" ? "ffmpeg.exe" : "ffmpeg");
-
-  // Ensure executable — may fail on read-only Lambda fs, but npm preserves the bit anyway.
-  try {
-    let ok = false;
-    if (p === "linux" || p === "darwin") {
-      const s = statSync(bin);
-      const uid = process.getuid?.() ?? -1;
-      const gid = process.getgid?.() ?? -1;
-      ok = Boolean(s.mode & 0o001) ||
-        (uid === s.uid && Boolean(s.mode & 0o100)) ||
-        (gid === s.gid && Boolean(s.mode & 0o010));
-    } else {
-      try { accessSync(bin, constants.X_OK); ok = true; } catch { ok = false; }
-    }
-    if (!ok) chmodSync(bin, 0o755);
-  } catch { /* best-effort */ }
-
-  // macOS needs DYLD_LIBRARY_PATH so the binary can find the bundled .dylib files.
-  const env = p === "darwin" ? { ...process.env, DYLD_LIBRARY_PATH: dir } : undefined;
-
-  return { bin, cwd: dir, env };
-};
+if (!ffmpegPath) {
+  throw new Error("ffmpeg-static binary not found for this platform");
+}
 
 type ClipTrimRequest = {
   pathname?: string;
@@ -119,12 +78,11 @@ export const POST = async (request: Request) => {
 
   try {
     const sourceUrl = `${BLOB_BASE_URL}/${encodeBlobPathname(pathname)}`;
-    const { bin, cwd, env } = getFfmpegBin();
 
     // -ss before -i seeks via HTTP range requests, so ffmpeg reads only the
     // moov atom plus the requested segment instead of the whole source file.
     await execFileAsync(
-      bin,
+      ffmpegPath!,
       [
         "-hide_banner",
         "-loglevel",
@@ -157,7 +115,7 @@ export const POST = async (request: Request) => {
         "-y",
         outputPath,
       ],
-      { maxBuffer: 1024 * 1024 * 64, cwd, env },
+      { maxBuffer: 1024 * 1024 * 64 },
     );
 
     const trimmed = await readFile(outputPath);
