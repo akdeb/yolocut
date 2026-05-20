@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { chmodSync } from "node:fs";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -12,6 +13,23 @@ export const maxDuration = 120;
 
 const execFileAsync = promisify(execFile);
 const SESSION_COOKIE = "yolocut_session";
+
+// getExecutablePath is exported at runtime but missing from @remotion/renderer's TS declarations.
+// eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
+const { getExecutablePath } = require("@remotion/renderer") as {
+  getExecutablePath: (opts: {
+    type: "ffmpeg" | "ffprobe" | "compositor";
+    indent: boolean;
+    logLevel: "error" | "info" | "verbose" | "warn" | "trace";
+    binariesDirectory: string | null;
+  }) => string;
+};
+
+const getFfmpegPath = () => {
+  const bin = getExecutablePath({ type: "ffmpeg", indent: false, logLevel: "error", binariesDirectory: null });
+  try { chmodSync(bin, 0o755); } catch { /* already executable */ }
+  return bin;
+};
 const BLOB_BASE_URL =
   process.env.BLOB_BASE_URL ?? "https://nl1diqavf0vxk1gf.private.blob.vercel-storage.com";
 const MAX_CLIP_SECONDS = 120;
@@ -75,10 +93,8 @@ export const POST = async (request: Request) => {
     // -ss before -i seeks via HTTP range requests, so ffmpeg reads only the
     // moov atom plus the requested segment instead of the whole source file.
     await execFileAsync(
-      process.platform === "win32" ? "npx.cmd" : "npx",
+      getFfmpegPath(),
       [
-        "remotion",
-        "ffmpeg",
         "-hide_banner",
         "-loglevel",
         "error",
