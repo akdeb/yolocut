@@ -12,7 +12,7 @@
 
 @theme inline {
   --font-playfair: var(--font-playfair), Georgia, serif;
-  --font-sans: var(--font-playfair), Georgia, serif;
+  --font-sans: var(--font-sans);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-background-subtle: var(--background-subtle);
@@ -61,7 +61,7 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
-  --font-serif: var(--font-playfair), Georgia, serif;
+  --font-serif: serif;
   --radius: 0.5rem;
   --tracking-tighter: calc(var(--tracking-normal) - 0.05em);
   --tracking-tight: calc(var(--tracking-normal) - 0.025em);
@@ -132,8 +132,8 @@
   --sidebar-border: oklch(0.9298 0.0138 76.5785);
   --sidebar-ring: oklch(0.8512 0.1254 73.9788);
   --destructive-foreground: oklch(0.9934 0.0032 17.2118);
-  --font-sans: var(--font-playfair), Georgia, serif;
-  --font-serif: var(--font-playfair), Georgia, serif;
+  --font-sans: var(--font-sans);
+  --font-serif: serif;
   --font-mono: monospace;
   --shadow-color: #000000;
   --shadow-opacity: 0.17;
@@ -195,8 +195,8 @@
   --sidebar-ring: oklch(0.8512 0.1254 73.9788);
   --destructive-foreground: oklch(0.9368 0.0045 34.3092);
   --radius: 0.5rem;
-  --font-sans: var(--font-playfair), Georgia, serif;
-  --font-serif: var(--font-playfair), Georgia, serif;
+  --font-sans: var(--font-sans);
+  --font-serif: serif;
   --font-mono: monospace;
   --shadow-color: #000000;
   --shadow-opacity: 0.17;

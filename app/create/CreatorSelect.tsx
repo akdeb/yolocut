@@ -66,7 +66,7 @@ export const CreatorSelect = ({
       <PopoverTrigger asChild>
         <Button
           variant="outline"
-          className="h-9 min-w-[180px] justify-between gap-2 rounded-[14px] px-2.5 shadow-sm font-serif font-sans"
+          className="h-9 min-w-[180px] justify-between gap-2 rounded-[14px] px-2.5 shadow-sm font-sans"
           disabled={disabled}
           aria-expanded={open}
           aria-label="Select creator"

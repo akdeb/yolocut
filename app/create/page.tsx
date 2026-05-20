@@ -1002,7 +1002,7 @@ const YolocutPage = () => {
               <div className="grid aspect-[9/16] w-full max-w-[260px] place-items-center justify-self-center rounded-[2.5rem] border-[10px] border-neutral-950 bg-neutral-950 text-center text-sm font-semibold text-white/70 shadow-2xl">
                 <div className="grid justify-items-center gap-3 px-8">
                   <Sparkles className="size-7 animate-pulse text-emerald-300" strokeWidth={1} />
-                  <span className="font-playfair font-normal">
+                  <span className="font-sans font-normal">
                     {creationStatus === "error"
                       ? searchError || finalAudioError || "Something went wrong."
                       : creationStatus === "audio"
