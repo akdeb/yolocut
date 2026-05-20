@@ -14,19 +14,22 @@ export const maxDuration = 120;
 const execFileAsync = promisify(execFile);
 const SESSION_COOKIE = "yolocut_session";
 
-// getExecutablePath is exported at runtime but missing from @remotion/renderer's TS declarations.
+// getExecutablePath lives inside RenderInternals (not a top-level export) and is
+// absent from the TS declarations, so we pull it out via require at runtime.
 // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-explicit-any
-const { getExecutablePath } = require("@remotion/renderer") as {
-  getExecutablePath: (opts: {
-    type: "ffmpeg" | "ffprobe" | "compositor";
-    indent: boolean;
-    logLevel: "error" | "info" | "verbose" | "warn" | "trace";
-    binariesDirectory: string | null;
-  }) => string;
+const { RenderInternals } = require("@remotion/renderer") as {
+  RenderInternals: {
+    getExecutablePath: (opts: {
+      type: "ffmpeg" | "ffprobe" | "compositor";
+      indent: boolean;
+      logLevel: "error" | "info" | "verbose" | "warn" | "trace";
+      binariesDirectory: string | null;
+    }) => string;
+  };
 };
 
 const getFfmpegPath = () => {
-  const bin = getExecutablePath({ type: "ffmpeg", indent: false, logLevel: "error", binariesDirectory: null });
+  const bin = RenderInternals.getExecutablePath({ type: "ffmpeg", indent: false, logLevel: "error", binariesDirectory: null });
   try { chmodSync(bin, 0o755); } catch { /* already executable */ }
   return bin;
 };
